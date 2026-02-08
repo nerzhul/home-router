@@ -1,6 +1,7 @@
 use anyhow::Result;
 use dhcp_server::{create_router, db::Database, dhcp::DhcpServer, Config};
 use std::sync::Arc;
+use tower::ServiceExt;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -48,8 +49,58 @@ async fn main() -> Result<()> {
 
     // Start API server
     let api_addr = format!("{}:{}", config.api.listen_address, config.api.port);
-    let api_db = Arc::clone(&db);
+    let unix_socket_path = config.api.unix_socket.clone();
 
+    // Start Unix socket listener if configured
+    if let Some(socket_path) = unix_socket_path {
+        let api_db_unix = Arc::clone(&db);
+        tokio::spawn(async move {
+            // Remove existing socket file if it exists
+            let _ = std::fs::remove_file(&socket_path);
+
+            let app = create_router(api_db_unix);
+
+            match tokio::net::UnixListener::bind(&socket_path) {
+                Ok(listener) => {
+                    info!("API server listening on Unix socket: {}", socket_path);
+
+                    loop {
+                        match listener.accept().await {
+                            Ok((stream, _)) => {
+                                let app = app.clone();
+                                tokio::spawn(async move {
+                                    let stream = hyper_util::rt::TokioIo::new(stream);
+                                    let hyper_service = hyper::service::service_fn(
+                                        move |request: hyper::Request<hyper::body::Incoming>| {
+                                            app.clone().oneshot(request)
+                                        },
+                                    );
+
+                                    if let Err(err) = hyper_util::server::conn::auto::Builder::new(
+                                        hyper_util::rt::TokioExecutor::new(),
+                                    )
+                                    .serve_connection(stream, hyper_service)
+                                    .await
+                                    {
+                                        error!("Error serving Unix socket connection: {}", err);
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                error!("Error accepting Unix socket connection: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to bind Unix socket at {}: {}", socket_path, e);
+                }
+            }
+        });
+    }
+
+    // Start TCP API server
+    let api_db = Arc::clone(&db);
     tokio::spawn(async move {
         let app = create_router(api_db);
         let listener = match tokio::net::TcpListener::bind(&api_addr).await {

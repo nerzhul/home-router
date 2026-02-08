@@ -11,6 +11,8 @@ database_path: /var/lib/dhcp-server/dhcp.db
 api:
   listen_address: 127.0.0.1
   port: 8080
+  # Unix socket for local communication (optional)
+  unix_socket: /var/run/dhcp-server.sock
 
 # DHCP Server configuration
 dhcp:

@@ -6,14 +6,14 @@ use std::net::Ipv4Addr;
 pub struct Config {
     /// Listening addresses for the DHCP server
     pub listen_addresses: Vec<Ipv4Addr>,
-    
+
     /// Database file path
     #[serde(default = "default_db_path")]
     pub database_path: String,
-    
+
     /// API server configuration
     pub api: ApiConfig,
-    
+
     /// DHCP server configuration
     pub dhcp: DhcpConfig,
 }
@@ -27,10 +27,14 @@ pub struct ApiConfig {
     /// API listening address
     #[serde(default = "default_api_address")]
     pub listen_address: String,
-    
+
     /// API listening port
     #[serde(default = "default_api_port")]
     pub port: u16,
+
+    /// Unix socket path (optional, for local communication)
+    #[serde(default = "default_unix_socket")]
+    pub unix_socket: Option<String>,
 }
 
 fn default_api_address() -> String {
@@ -41,12 +45,16 @@ fn default_api_port() -> u16 {
     8080
 }
 
+fn default_unix_socket() -> Option<String> {
+    Some("/var/run/dhcp-server.sock".to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhcpConfig {
     /// Default lease time in seconds
     #[serde(default = "default_lease_time")]
     pub default_lease_time: u32,
-    
+
     /// Maximum lease time in seconds
     #[serde(default = "default_max_lease_time")]
     pub max_lease_time: u32,
@@ -67,7 +75,7 @@ impl Config {
         let config = serde_yaml::from_str(&contents)?;
         Ok(config)
     }
-    
+
     /// Save configuration to a YAML file
     pub fn to_file(&self, path: &str) -> anyhow::Result<()> {
         let yaml = serde_yaml::to_string(self)?;
@@ -84,6 +92,7 @@ impl Default for Config {
             api: ApiConfig {
                 listen_address: default_api_address(),
                 port: default_api_port(),
+                unix_socket: default_unix_socket(),
             },
             dhcp: DhcpConfig {
                 default_lease_time: default_lease_time(),

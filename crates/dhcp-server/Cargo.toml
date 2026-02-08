@@ -26,3 +26,5 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
+hyper = "1.5"
+hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio"] }

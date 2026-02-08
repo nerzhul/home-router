@@ -8,9 +8,9 @@ use anyhow::Result;
 #[command(name = "dhcp-cli")]
 #[command(about = "DHCP Server CLI", long_about = None)]
 struct Cli {
-    /// API server URL
-    #[arg(long, default_value = "http://localhost:8080")]
-    api_url: String,
+    /// API server URL (http://...) or Unix socket path (default: /var/run/dhcp-server.sock)
+    #[arg(long, short = 'u')]
+    api_url: Option<String>,
     
     #[command(subcommand)]
     command: Commands,
@@ -131,7 +131,20 @@ enum StaticCommands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let client = client::ApiClient::new(&cli.api_url);
+    
+    // Determine client type based on api_url
+    let client = match &cli.api_url {
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
+            client::ApiClient::new_http(url)
+        }
+        Some(path) => {
+            client::ApiClient::new_unix(path)
+        }
+        None => {
+            // Default to Unix socket
+            client::ApiClient::new_unix("/var/run/dhcp-server.sock")
+        }
+    };
     
     match cli.command {
         Commands::Subnet { action } => {
