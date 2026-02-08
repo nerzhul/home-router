@@ -1,0 +1,122 @@
+use crate::{db::Database, models::Subnet};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
+use std::sync::Arc;
+
+/// List all subnets
+#[utoipa::path(
+    get,
+    path = "/api/subnets",
+    tag = "subnets",
+    responses(
+        (status = 200, description = "List of subnets", body = Vec<Subnet>),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn list_subnets(
+    State(db): State<Arc<Database>>,
+) -> Result<Json<Vec<Subnet>>, StatusCode> {
+    db.list_subnets()
+        .await
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Create a new subnet
+#[utoipa::path(
+    post,
+    path = "/api/subnets",
+    tag = "subnets",
+    request_body = Subnet,
+    responses(
+        (status = 201, description = "Subnet created", body = i64),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn create_subnet(
+    State(db): State<Arc<Database>>,
+    Json(subnet): Json<Subnet>,
+) -> Result<(StatusCode, Json<i64>), StatusCode> {
+    db.create_subnet(&subnet)
+        .await
+        .map(|id| (StatusCode::CREATED, Json(id)))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Get a subnet by ID
+#[utoipa::path(
+    get,
+    path = "/api/subnets/{id}",
+    tag = "subnets",
+    params(
+        ("id" = i64, Path, description = "Subnet ID")
+    ),
+    responses(
+        (status = 200, description = "Subnet found", body = Subnet),
+        (status = 404, description = "Subnet not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_subnet(
+    State(db): State<Arc<Database>>,
+    Path(id): Path<i64>,
+) -> Result<Json<Subnet>, StatusCode> {
+    db.get_subnet(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Update a subnet
+#[utoipa::path(
+    put,
+    path = "/api/subnets/{id}",
+    tag = "subnets",
+    params(
+        ("id" = i64, Path, description = "Subnet ID")
+    ),
+    request_body = Subnet,
+    responses(
+        (status = 200, description = "Subnet updated"),
+        (status = 404, description = "Subnet not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn update_subnet(
+    State(db): State<Arc<Database>>,
+    Path(id): Path<i64>,
+    Json(subnet): Json<Subnet>,
+) -> Result<StatusCode, StatusCode> {
+    db.update_subnet(id, &subnet)
+        .await
+        .map(|_| StatusCode::OK)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Delete a subnet
+#[utoipa::path(
+    delete,
+    path = "/api/subnets/{id}",
+    tag = "subnets",
+    params(
+        ("id" = i64, Path, description = "Subnet ID")
+    ),
+    responses(
+        (status = 204, description = "Subnet deleted"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn delete_subnet(
+    State(db): State<Arc<Database>>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, StatusCode> {
+    db.delete_subnet(id)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}

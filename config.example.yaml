@@ -1,0 +1,21 @@
+# DHCP Server Configuration
+
+# Listening addresses for DHCP server (IPv4)
+listen_addresses:
+  - 0.0.0.0
+
+# Database configuration
+database_path: /var/lib/dhcp-server/dhcp.db
+
+# API Server configuration
+api:
+  listen_address: 127.0.0.1
+  port: 8080
+
+# DHCP Server configuration
+dhcp:
+  # Default lease time in seconds (24 hours)
+  default_lease_time: 86400
+  
+  # Maximum lease time in seconds (7 days)
+  max_lease_time: 604800

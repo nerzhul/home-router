@@ -1,0 +1,28 @@
+[Unit]
+Description=DHCP Server Daemon
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=dhcp-server
+Group=dhcp-server
+Environment="DHCP_CONFIG=/etc/dhcp-server/config.yaml"
+Environment="RUST_LOG=info"
+ExecStart=/usr/local/bin/dhcp-server
+Restart=on-failure
+RestartSec=5s
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/dhcp-server
+
+# Capabilities needed for DHCP (port 67)
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
