@@ -290,3 +290,296 @@ impl DhcpServer {
         Ipv4Addr::from(mask)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dhcp::test_helpers::*;
+    use crate::models::{Lease, StaticIP};
+
+    #[tokio::test]
+    async fn test_handle_discover_with_static_ip() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create static IP assignment
+        let static_ip = StaticIP {
+            id: None,
+            subnet_id,
+            mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 50),
+            hostname: Some("test-host".to_string()),
+            enabled: true,
+        };
+        db.create_static_ip(&static_ip).await.unwrap();
+
+        // Create test packet
+        let packet = create_discover_packet("AA:BB:CC:DD:EE:FF");
+
+        // Test handle_discover
+        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+
+        assert!(response.is_some());
+        let offer = response.unwrap();
+        assert_eq!(offer.yiaddr, Ipv4Addr::new(192, 168, 1, 50));
+        assert_eq!(offer.xid, 12345);
+        assert_eq!(offer.op, 2); // BOOTREPLY
+
+        // Verify options
+        let msg_type = offer.get_message_type();
+        assert_eq!(msg_type, Some(MessageType::Offer));
+    }
+
+    #[tokio::test]
+    async fn test_handle_discover_with_existing_lease() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create an active lease
+        let now = chrono::Utc::now().timestamp();
+        let lease = Lease {
+            id: None,
+            subnet_id,
+            mac_address: "11:22:33:44:55:66".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 100),
+            lease_start: now,
+            lease_end: now + 86400,
+            hostname: None,
+            active: true,
+        };
+        db.create_lease(&lease).await.unwrap();
+
+        // Create test packet
+        let packet = create_discover_packet("11:22:33:44:55:66");
+
+        // Test handle_discover
+        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+
+        assert!(response.is_some());
+        let offer = response.unwrap();
+        assert_eq!(offer.yiaddr, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(offer.xid, 12345);
+
+        let msg_type = offer.get_message_type();
+        assert_eq!(msg_type, Some(MessageType::Offer));
+    }
+
+    #[tokio::test]
+    async fn test_handle_discover_no_allocation() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet but no static IP or lease
+        let subnet = create_test_subnet();
+        db.create_subnet(&subnet).await.unwrap();
+
+        // Create test packet
+        let packet = create_discover_packet("99:88:77:66:55:44");
+
+        // Test handle_discover
+        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+
+        // Should return None as dynamic allocation is not implemented yet
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_discover_static_ip_takes_precedence() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create static IP assignment
+        let static_ip = StaticIP {
+            id: None,
+            subnet_id,
+            mac_address: "AA:BB:CC:DD:EE:00".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 50),
+            hostname: Some("static-host".to_string()),
+            enabled: true,
+        };
+        db.create_static_ip(&static_ip).await.unwrap();
+
+        // Also create a lease for the same MAC
+        let now = chrono::Utc::now().timestamp();
+        let lease = Lease {
+            id: None,
+            subnet_id,
+            mac_address: "AA:BB:CC:DD:EE:00".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 100),
+            lease_start: now,
+            lease_end: now + 86400,
+            hostname: None,
+            active: true,
+        };
+        db.create_lease(&lease).await.unwrap();
+
+        // Create test packet
+        let packet = create_discover_packet("AA:BB:CC:DD:EE:00");
+
+        // Test handle_discover - static IP should take precedence
+        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+
+        assert!(response.is_some());
+        let offer = response.unwrap();
+        // Should offer the static IP, not the leased IP
+        assert_eq!(offer.yiaddr, Ipv4Addr::new(192, 168, 1, 50));
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_with_static_ip() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create static IP assignment
+        let static_ip = StaticIP {
+            id: None,
+            subnet_id,
+            mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 50),
+            hostname: Some("test-host".to_string()),
+            enabled: true,
+        };
+        db.create_static_ip(&static_ip).await.unwrap();
+
+        // Create request packet
+        let packet = create_request_packet("AA:BB:CC:DD:EE:FF", Ipv4Addr::new(192, 168, 1, 50));
+
+        // Test handle_request
+        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+
+        assert!(response.is_some());
+        let ack = response.unwrap();
+        assert_eq!(ack.yiaddr, Ipv4Addr::new(192, 168, 1, 50));
+        assert_eq!(ack.xid, 67890);
+        assert_eq!(ack.op, 2); // BOOTREPLY
+
+        // Verify it's an ACK
+        let msg_type = ack.get_message_type();
+        assert_eq!(msg_type, Some(MessageType::Ack));
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_with_wrong_static_ip() {
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create static IP assignment
+        let static_ip = StaticIP {
+            id: None,
+            subnet_id,
+            mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 50),
+            hostname: Some("test-host".to_string()),
+            enabled: true,
+        };
+        db.create_static_ip(&static_ip).await.unwrap();
+
+        // Request a different IP than the static one
+        let packet = create_request_packet("AA:BB:CC:DD:EE:FF", Ipv4Addr::new(192, 168, 1, 100));
+
+        // Test handle_request - should return None as requested IP doesn't match static IP
+        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_without_requested_ip() {
+        use dhcp_proto::MacAddress;
+
+        let config = create_test_config();
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        db.create_subnet(&subnet).await.unwrap();
+
+        // Create request packet without RequestedIpAddress option
+        let mut packet = DhcpPacket::new();
+        packet.op = 1;
+        packet.xid = 67890;
+        packet.chaddr = MacAddress::from_string("AA:BB:CC:DD:EE:FF").unwrap();
+        packet
+            .options
+            .push(DhcpOption::MessageType(MessageType::Request));
+
+        // Test handle_request - should return None without requested IP
+        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_release_with_active_lease() {
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet
+        let subnet = create_test_subnet();
+        let subnet_id = db.create_subnet(&subnet).await.unwrap();
+
+        // Create an active lease
+        let now = chrono::Utc::now().timestamp();
+        let lease = Lease {
+            id: None,
+            subnet_id,
+            mac_address: "11:22:33:44:55:66".to_string(),
+            ip_address: Ipv4Addr::new(192, 168, 1, 100),
+            lease_start: now,
+            lease_end: now + 86400,
+            hostname: None,
+            active: true,
+        };
+        let _lease_id = db.create_lease(&lease).await.unwrap();
+
+        // Verify lease exists and is active
+        let active_lease = db.get_active_lease("11:22:33:44:55:66").await.unwrap();
+        assert!(active_lease.is_some());
+
+        // Create release packet
+        let packet = create_release_packet("11:22:33:44:55:66");
+
+        // Test handle_release
+        DhcpServer::handle_release(&packet, &db).await;
+
+        // Verify lease has been expired
+        let active_lease_after = db.get_active_lease("11:22:33:44:55:66").await.unwrap();
+        assert!(active_lease_after.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_release_without_lease() {
+        let db = Database::new(":memory:").await.unwrap();
+
+        // Create subnet (for completeness)
+        let subnet = create_test_subnet();
+        db.create_subnet(&subnet).await.unwrap();
+
+        // Create release packet for a MAC that has no lease
+        let packet = create_release_packet("99:88:77:66:55:44");
+
+        // Test handle_release - should not fail even without lease
+        DhcpServer::handle_release(&packet, &db).await;
+
+        // No assertion needed - just verify it doesn't panic
+    }
+}

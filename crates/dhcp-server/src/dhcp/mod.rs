@@ -1,6 +1,9 @@
 pub mod packet;
 pub mod server;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 pub use server::DhcpServer;
 
 // Re-export types from dhcp-proto
