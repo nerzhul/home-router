@@ -1,12 +1,32 @@
 use anyhow::Result;
+use clap::Parser;
 use dhcp_server::{create_router, db::Database, dhcp::DhcpServer, Config};
 use std::sync::Arc;
 use tower::ServiceExt;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// DHCP Server - A simple DHCP server with API
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Configuration file path
+    #[arg(short, long, default_value = "/etc/dhcp-server/config.yaml")]
+    config: String,
+
+    /// Data directory for database and other files
+    #[arg(short, long)]
+    data_dir: Option<String>,
+
+    /// Unix socket path for API communication
+    #[arg(short = 's', long)]
+    unix_socket: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(
@@ -18,21 +38,50 @@ async fn main() -> Result<()> {
 
     info!("Starting DHCP Server");
 
-    // Load configuration
-    let config_path =
-        std::env::var("DHCP_CONFIG").unwrap_or_else(|_| "/etc/dhcp-server/config.yaml".to_string());
+    // Load configuration - try specified path, then current directory
+    let config_path = if std::path::Path::new(&args.config).exists() {
+        args.config.clone()
+    } else if args.config == "/etc/dhcp-server/config.yaml" {
+        // If default path doesn't exist, try current directory
+        let current_dir_config = "config.yaml";
+        if std::path::Path::new(current_dir_config).exists() {
+            info!(
+                "Config not found at {}, using {}",
+                args.config, current_dir_config
+            );
+            current_dir_config.to_string()
+        } else {
+            args.config.clone()
+        }
+    } else {
+        args.config.clone()
+    };
 
-    let config = match Config::from_file(&config_path) {
+    let mut config = match Config::from_file(&config_path) {
         Ok(cfg) => {
             info!("Loaded configuration from {}", config_path);
-            Arc::new(cfg)
+            cfg
         }
         Err(e) => {
             error!("Failed to load configuration from {}: {}", config_path, e);
             info!("Using default configuration");
-            Arc::new(Config::default())
+            Config::default()
         }
     };
+
+    // Override database path if data_dir is specified
+    if let Some(data_dir) = args.data_dir {
+        let db_path = std::path::Path::new(&data_dir).join("dhcp.db");
+        config.database_path = db_path.to_string_lossy().to_string();
+        info!("Using data directory: {}", data_dir);
+    }
+
+    // Override unix socket path if specified
+    if let Some(socket_path) = args.unix_socket {
+        config.api.unix_socket = Some(socket_path);
+    }
+
+    let config = Arc::new(config);
 
     // Initialize database
     let db_url = format!("sqlite:{}", config.database_path);
@@ -54,46 +103,46 @@ async fn main() -> Result<()> {
     // Start Unix socket listener if configured
     if let Some(socket_path) = unix_socket_path {
         let api_db_unix = Arc::clone(&db);
+        
+        // Remove existing socket file if it exists
+        let _ = std::fs::remove_file(&socket_path);
+
+        let app = create_router(api_db_unix);
+
+        let listener = tokio::net::UnixListener::bind(&socket_path)
+            .map_err(|e| {
+                error!("Failed to bind Unix socket at {}: {}", socket_path, e);
+                e
+            })?;
+        
+        info!("API server listening on Unix socket: {}", socket_path);
+
         tokio::spawn(async move {
-            // Remove existing socket file if it exists
-            let _ = std::fs::remove_file(&socket_path);
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        let app = app.clone();
+                        tokio::spawn(async move {
+                            let stream = hyper_util::rt::TokioIo::new(stream);
+                            let hyper_service = hyper::service::service_fn(
+                                move |request: hyper::Request<hyper::body::Incoming>| {
+                                    app.clone().oneshot(request)
+                                },
+                            );
 
-            let app = create_router(api_db_unix);
-
-            match tokio::net::UnixListener::bind(&socket_path) {
-                Ok(listener) => {
-                    info!("API server listening on Unix socket: {}", socket_path);
-
-                    loop {
-                        match listener.accept().await {
-                            Ok((stream, _)) => {
-                                let app = app.clone();
-                                tokio::spawn(async move {
-                                    let stream = hyper_util::rt::TokioIo::new(stream);
-                                    let hyper_service = hyper::service::service_fn(
-                                        move |request: hyper::Request<hyper::body::Incoming>| {
-                                            app.clone().oneshot(request)
-                                        },
-                                    );
-
-                                    if let Err(err) = hyper_util::server::conn::auto::Builder::new(
-                                        hyper_util::rt::TokioExecutor::new(),
-                                    )
-                                    .serve_connection(stream, hyper_service)
-                                    .await
-                                    {
-                                        error!("Error serving Unix socket connection: {}", err);
-                                    }
-                                });
+                            if let Err(err) = hyper_util::server::conn::auto::Builder::new(
+                                hyper_util::rt::TokioExecutor::new(),
+                            )
+                            .serve_connection(stream, hyper_service)
+                            .await
+                            {
+                                error!("Error serving Unix socket connection: {}", err);
                             }
-                            Err(e) => {
-                                error!("Error accepting Unix socket connection: {}", e);
-                            }
-                        }
+                        });
                     }
-                }
-                Err(e) => {
-                    error!("Failed to bind Unix socket at {}: {}", socket_path, e);
+                    Err(e) => {
+                        error!("Error accepting Unix socket connection: {}", e);
+                    }
                 }
             }
         });
@@ -101,19 +150,18 @@ async fn main() -> Result<()> {
 
     // Start TCP API server
     let api_db = Arc::clone(&db);
+    let app = create_router(api_db);
+    
+    let listener = tokio::net::TcpListener::bind(&api_addr).await
+        .map_err(|e| {
+            error!("Failed to bind API server to {}: {}", api_addr, e);
+            e
+        })?;
+
+    info!("API server listening on {}", api_addr);
+    info!("Swagger UI available at http://{}/swagger-ui", api_addr);
+
     tokio::spawn(async move {
-        let app = create_router(api_db);
-        let listener = match tokio::net::TcpListener::bind(&api_addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!("Failed to bind API server to {}: {}", api_addr, e);
-                return;
-            }
-        };
-
-        info!("API server listening on {}", api_addr);
-        info!("Swagger UI available at http://{}/swagger-ui", api_addr);
-
         if let Err(e) = axum::serve(listener, app).await {
             error!("API server error: {}", e);
         }
