@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use dhcp_server::{create_router, db::Database, dhcp::DhcpServer, Config};
+use dhcp_server::{create_router_with_auth, db::Database, dhcp::DhcpServer, Config};
 use std::sync::Arc;
 use tower::ServiceExt;
 use tracing::{error, info};
@@ -103,19 +103,22 @@ async fn main() -> Result<()> {
     // Start Unix socket listener if configured
     if let Some(socket_path) = unix_socket_path {
         let api_db_unix = Arc::clone(&db);
-        
+
         // Remove existing socket file if it exists
         let _ = std::fs::remove_file(&socket_path);
 
-        let app = create_router(api_db_unix);
+        // Unix socket: no authentication required
+        let app = create_router_with_auth(api_db_unix, false);
 
-        let listener = tokio::net::UnixListener::bind(&socket_path)
-            .map_err(|e| {
-                error!("Failed to bind Unix socket at {}: {}", socket_path, e);
-                e
-            })?;
-        
-        info!("API server listening on Unix socket: {}", socket_path);
+        let listener = tokio::net::UnixListener::bind(&socket_path).map_err(|e| {
+            error!("Failed to bind Unix socket at {}: {}", socket_path, e);
+            e
+        })?;
+
+        info!(
+            "API server listening on Unix socket: {} (no auth)",
+            socket_path
+        );
 
         tokio::spawn(async move {
             loop {
@@ -150,15 +153,27 @@ async fn main() -> Result<()> {
 
     // Start TCP API server
     let api_db = Arc::clone(&db);
-    let app = create_router(api_db);
-    
-    let listener = tokio::net::TcpListener::bind(&api_addr).await
+    let require_auth = config.api.require_authentication.unwrap_or(false);
+    let app = create_router_with_auth(api_db, require_auth);
+
+    let listener = tokio::net::TcpListener::bind(&api_addr)
+        .await
         .map_err(|e| {
             error!("Failed to bind API server to {}: {}", api_addr, e);
             e
         })?;
 
-    info!("API server listening on {}", api_addr);
+    if require_auth {
+        info!(
+            "API server listening on {} (authentication enabled)",
+            api_addr
+        );
+    } else {
+        info!(
+            "API server listening on {} (authentication disabled)",
+            api_addr
+        );
+    }
     info!("Swagger UI available at http://{}/swagger-ui", api_addr);
 
     tokio::spawn(async move {

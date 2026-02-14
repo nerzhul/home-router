@@ -29,3 +29,7 @@ utoipa-swagger-ui = { workspace = true }
 hyper = "1.5"
 hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio"] }
 clap.workspace = true
+argon2 = "0.5.3"
+base64 = "0.22.1"
+getrandom = "0.4.1"
+rand = "0.8"

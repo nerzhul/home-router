@@ -6,25 +6,25 @@ use utoipa::ToSchema;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Subnet {
     pub id: Option<i64>,
-    
+
     /// Network address (e.g., 192.168.1.0)
     #[schema(value_type = String)]
     pub network: Ipv4Addr,
-    
+
     /// Subnet mask (e.g., 24 for /24)
     pub netmask: u8,
-    
+
     /// Gateway/router address
     #[schema(value_type = String)]
     pub gateway: Ipv4Addr,
-    
+
     /// DNS servers (comma-separated in DB)
     #[schema(value_type = Vec<String>)]
     pub dns_servers: Vec<Ipv4Addr>,
-    
+
     /// Domain name
     pub domain_name: Option<String>,
-    
+
     /// Whether this subnet is enabled
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -38,18 +38,18 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DynamicRange {
     pub id: Option<i64>,
-    
+
     /// Foreign key to subnet
     pub subnet_id: i64,
-    
+
     /// Start of the range (e.g., 192.168.1.100)
     #[schema(value_type = String)]
     pub range_start: Ipv4Addr,
-    
+
     /// End of the range (e.g., 192.168.1.200)
     #[schema(value_type = String)]
     pub range_end: Ipv4Addr,
-    
+
     /// Whether this range is enabled
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -59,20 +59,20 @@ pub struct DynamicRange {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StaticIP {
     pub id: Option<i64>,
-    
+
     /// Foreign key to subnet
     pub subnet_id: i64,
-    
+
     /// MAC address (format: XX:XX:XX:XX:XX:XX)
     pub mac_address: String,
-    
+
     /// Assigned IP address
     #[schema(value_type = String)]
     pub ip_address: Ipv4Addr,
-    
+
     /// Optional hostname
     pub hostname: Option<String>,
-    
+
     /// Whether this assignment is enabled
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -82,26 +82,26 @@ pub struct StaticIP {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Lease {
     pub id: Option<i64>,
-    
+
     /// Foreign key to subnet
     pub subnet_id: i64,
-    
+
     /// MAC address of the client
     pub mac_address: String,
-    
+
     /// Leased IP address
     #[schema(value_type = String)]
     pub ip_address: Ipv4Addr,
-    
+
     /// Lease start time (Unix timestamp)
     pub lease_start: i64,
-    
+
     /// Lease end time (Unix timestamp)
     pub lease_end: i64,
-    
+
     /// Optional hostname
     pub hostname: Option<String>,
-    
+
     /// Whether this is an active lease
     #[serde(default = "default_true")]
     pub active: bool,
@@ -116,10 +116,61 @@ impl Subnet {
             .collect::<Vec<_>>()
             .join(",")
     }
-    
+
     pub fn dns_servers_from_string(s: &str) -> Vec<Ipv4Addr> {
         s.split(',')
             .filter_map(|ip| ip.trim().parse().ok())
             .collect()
     }
+}
+
+/// An API token for authentication
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ApiToken {
+    pub id: Option<i64>,
+
+    /// Descriptive name for the token
+    pub name: String,
+
+    /// Token hash (not exposed to client after creation)
+    #[serde(skip_serializing)]
+    pub token_hash: Option<String>,
+
+    /// Salt for token (not exposed to client)
+    #[serde(skip_serializing)]
+    pub salt: Option<String>,
+
+    /// Creation timestamp
+    pub created_at: Option<i64>,
+
+    /// Last used timestamp
+    pub last_used_at: Option<i64>,
+
+    /// Whether the token is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// The actual token value (only returned on creation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
+/// Request to create a new API token
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateTokenRequest {
+    /// Descriptive name for the token
+    pub name: String,
+}
+
+/// Response when creating a new API token
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CreateTokenResponse {
+    /// The token ID
+    pub id: i64,
+
+    /// The token name
+    pub name: String,
+
+    /// The actual token value (only shown once)
+    pub token: String,
 }

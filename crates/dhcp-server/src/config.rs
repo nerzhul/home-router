@@ -35,6 +35,10 @@ pub struct ApiConfig {
     /// Unix socket path (optional, for local communication)
     #[serde(default = "default_unix_socket")]
     pub unix_socket: Option<String>,
+
+    /// Require token authentication for TCP API (not Unix socket)
+    #[serde(default)]
+    pub require_authentication: Option<bool>,
 }
 
 fn default_api_address() -> String {
@@ -93,6 +97,7 @@ impl Default for Config {
                 listen_address: default_api_address(),
                 port: default_api_port(),
                 unix_socket: default_unix_socket(),
+                require_authentication: Some(false),
             },
             dhcp: DhcpConfig {
                 default_lease_time: default_lease_time(),

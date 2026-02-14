@@ -11,8 +11,11 @@ database_path: /var/lib/dhcp-server/dhcp.db
 api:
   listen_address: 127.0.0.1
   port: 8080
-  # Unix socket for local communication (optional)
+  # Unix socket for local communication (optional, no authentication required)
   unix_socket: /var/run/dhcp-server.sock
+  # Require token authentication for TCP API (default: false)
+  # Note: Unix socket connections are always exempt from authentication
+  require_authentication: false
 
 # DHCP Server configuration
 dhcp:
