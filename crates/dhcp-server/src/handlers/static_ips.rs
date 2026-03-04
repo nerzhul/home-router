@@ -1,11 +1,10 @@
-use crate::{db::Database, models::StaticIP};
+use crate::{models::StaticIP, AppState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
 use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct StaticIpQuery {
@@ -26,10 +25,12 @@ pub struct StaticIpQuery {
     )
 )]
 pub async fn list_static_ips(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Query(query): Query<StaticIpQuery>,
 ) -> Result<Json<Vec<StaticIP>>, StatusCode> {
-    db.list_static_ips(query.subnet_id)
+    state
+        .db
+        .list_static_ips(query.subnet_id)
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -48,10 +49,12 @@ pub async fn list_static_ips(
     )
 )]
 pub async fn create_static_ip(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Json(static_ip): Json<StaticIP>,
 ) -> Result<(StatusCode, Json<i64>), StatusCode> {
-    db.create_static_ip(&static_ip)
+    state
+        .db
+        .create_static_ip(&static_ip)
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -71,10 +74,12 @@ pub async fn create_static_ip(
     )
 )]
 pub async fn delete_static_ip(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    db.delete_static_ip(id)
+    state
+        .db
+        .delete_static_ip(id)
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

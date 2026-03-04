@@ -1,10 +1,9 @@
-use crate::{db::Database, models::Subnet};
+use crate::{models::Subnet, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use std::sync::Arc;
 
 /// List all subnets
 #[utoipa::path(
@@ -16,10 +15,10 @@ use std::sync::Arc;
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn list_subnets(
-    State(db): State<Arc<Database>>,
-) -> Result<Json<Vec<Subnet>>, StatusCode> {
-    db.list_subnets()
+pub async fn list_subnets(State(state): State<AppState>) -> Result<Json<Vec<Subnet>>, StatusCode> {
+    state
+        .db
+        .list_subnets()
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -38,10 +37,12 @@ pub async fn list_subnets(
     )
 )]
 pub async fn create_subnet(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Json(subnet): Json<Subnet>,
 ) -> Result<(StatusCode, Json<i64>), StatusCode> {
-    db.create_subnet(&subnet)
+    state
+        .db
+        .create_subnet(&subnet)
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -62,10 +63,12 @@ pub async fn create_subnet(
     )
 )]
 pub async fn get_subnet(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Subnet>, StatusCode> {
-    db.get_subnet(id)
+    state
+        .db
+        .get_subnet(id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map(Json)
@@ -88,11 +91,13 @@ pub async fn get_subnet(
     )
 )]
 pub async fn update_subnet(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(subnet): Json<Subnet>,
 ) -> Result<StatusCode, StatusCode> {
-    db.update_subnet(id, &subnet)
+    state
+        .db
+        .update_subnet(id, &subnet)
         .await
         .map(|_| StatusCode::OK)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -112,10 +117,12 @@ pub async fn update_subnet(
     )
 )]
 pub async fn delete_subnet(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    db.delete_subnet(id)
+    state
+        .db
+        .delete_subnet(id)
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

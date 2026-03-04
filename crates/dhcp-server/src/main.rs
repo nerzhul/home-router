@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use dhcp_server::{create_router_with_auth, db::Database, dhcp::DhcpServer, Config};
+use dhcp_server::{
+    config::RaConfig, create_router_with_auth, db::Database, dhcp::DhcpServer, Config,
+};
 use std::sync::Arc;
 use tower::ServiceExt;
 use tracing::{error, info};
@@ -83,6 +85,10 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(config);
 
+    // Create RaConfig from config or use defaults
+    let ra_config: Arc<RaConfig> =
+        Arc::new(config.ra.clone().unwrap_or_else(|| RaConfig::default()));
+
     // Initialize database
     let db_url = format!("sqlite:{}", config.database_path);
     let db = match Database::new(&db_url).await {
@@ -108,7 +114,7 @@ async fn main() -> Result<()> {
         let _ = std::fs::remove_file(&socket_path);
 
         // Unix socket: no authentication required
-        let app = create_router_with_auth(api_db_unix, false);
+        let app = create_router_with_auth(api_db_unix, ra_config.clone(), false);
 
         let listener = tokio::net::UnixListener::bind(&socket_path).map_err(|e| {
             error!("Failed to bind Unix socket at {}: {}", socket_path, e);
@@ -154,7 +160,7 @@ async fn main() -> Result<()> {
     // Start TCP API server
     let api_db = Arc::clone(&db);
     let require_auth = config.api.require_authentication.unwrap_or(false);
-    let app = create_router_with_auth(api_db, require_auth);
+    let app = create_router_with_auth(api_db, ra_config, require_auth);
 
     let listener = tokio::net::TcpListener::bind(&api_addr)
         .await

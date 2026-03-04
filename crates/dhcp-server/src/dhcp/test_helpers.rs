@@ -18,11 +18,13 @@ pub fn create_test_config() -> Config {
             listen_address: "127.0.0.1".to_string(),
             port: 8080,
             unix_socket: None,
+            require_authentication: Some(false),
         },
         dhcp: DhcpConfig {
             default_lease_time: 86400,
             max_lease_time: 604800,
         },
+        ra: None,
     }
 }
 

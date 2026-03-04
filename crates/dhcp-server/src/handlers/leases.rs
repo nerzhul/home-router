@@ -1,6 +1,5 @@
-use crate::{db::Database, models::Lease};
+use crate::{models::Lease, AppState};
 use axum::{extract::State, http::StatusCode, Json};
-use std::sync::Arc;
 
 /// List all active leases
 #[utoipa::path(
@@ -12,8 +11,10 @@ use std::sync::Arc;
         (status = 500, description = "Internal server error")
     )
 )]
-pub async fn list_leases(State(db): State<Arc<Database>>) -> Result<Json<Vec<Lease>>, StatusCode> {
-    db.list_active_leases()
+pub async fn list_leases(State(state): State<AppState>) -> Result<Json<Vec<Lease>>, StatusCode> {
+    state
+        .db
+        .list_active_leases()
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

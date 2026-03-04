@@ -1,11 +1,10 @@
-use crate::{db::Database, models::DynamicRange};
+use crate::{models::DynamicRange, AppState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
 use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct RangeQuery {
@@ -26,10 +25,12 @@ pub struct RangeQuery {
     )
 )]
 pub async fn list_ranges(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Query(query): Query<RangeQuery>,
 ) -> Result<Json<Vec<DynamicRange>>, StatusCode> {
-    db.list_ranges(query.subnet_id)
+    state
+        .db
+        .list_ranges(query.subnet_id)
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -48,10 +49,12 @@ pub async fn list_ranges(
     )
 )]
 pub async fn create_range(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Json(range): Json<DynamicRange>,
 ) -> Result<(StatusCode, Json<i64>), StatusCode> {
-    db.create_range(&range)
+    state
+        .db
+        .create_range(&range)
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -71,10 +74,12 @@ pub async fn create_range(
     )
 )]
 pub async fn delete_range(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    db.delete_range(id)
+    state
+        .db
+        .delete_range(id)
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

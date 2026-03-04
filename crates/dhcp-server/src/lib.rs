@@ -6,8 +6,8 @@ pub mod handlers;
 pub mod models;
 pub mod routes;
 
-pub use config::Config;
-pub use models::{DynamicRange, StaticIP, Subnet};
+pub use config::{Config, RaConfig};
+pub use models::{DynamicRange, IAPrefix, StaticIP, Subnet};
 
 use axum::{
     middleware,
@@ -38,6 +38,11 @@ use utoipa_swagger_ui::SwaggerUi;
         handlers::tokens::create_token,
         handlers::tokens::delete_token,
         handlers::tokens::toggle_token,
+        handlers::ia_prefixes::list_ia_prefixes,
+        handlers::ia_prefixes::create_ia_prefix,
+        handlers::ia_prefixes::get_ia_prefix,
+        handlers::ia_prefixes::update_ia_prefix,
+        handlers::ia_prefixes::delete_ia_prefix,
     ),
     components(
         schemas(
@@ -48,6 +53,7 @@ use utoipa_swagger_ui::SwaggerUi;
             models::ApiToken,
             models::CreateTokenRequest,
             models::CreateTokenResponse,
+            models::IAPrefix,
         )
     ),
     tags(
@@ -56,15 +62,35 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "static-ips", description = "Static IP management endpoints"),
         (name = "leases", description = "Lease information endpoints"),
         (name = "tokens", description = "API token management endpoints"),
+        (name = "ia-prefixes", description = "IPv6 prefix (IA Prefix) management for Router Advertisement"),
     )
 )]
 pub struct ApiDoc;
 
-pub fn create_router(db: Arc<Database>) -> Router {
-    create_router_with_auth(db, false)
+/// Application state shared across handlers
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Arc<Database>,
+    pub ra_config: Arc<RaConfig>,
 }
 
-pub fn create_router_with_auth(db: Arc<Database>, require_auth: bool) -> Router {
+impl AppState {
+    pub fn new(db: Arc<Database>, ra_config: Arc<RaConfig>) -> Self {
+        Self { db, ra_config }
+    }
+}
+
+pub fn create_router(db: Arc<Database>, ra_config: Arc<RaConfig>) -> Router {
+    create_router_with_auth(db, ra_config, false)
+}
+
+pub fn create_router_with_auth(
+    db: Arc<Database>,
+    ra_config: Arc<RaConfig>,
+    require_auth: bool,
+) -> Router {
+    let state = AppState::new(db.clone(), ra_config);
+
     let protected_routes = Router::new()
         // Subnet routes
         .route("/api/subnets", get(handlers::subnets::list_subnets))
@@ -98,6 +124,27 @@ pub fn create_router_with_auth(db: Arc<Database>, require_auth: bool) -> Router 
         .route(
             "/api/tokens/:id/toggle",
             patch(handlers::tokens::toggle_token),
+        )
+        // IA Prefix routes (IPv6 for Router Advertisement)
+        .route(
+            "/api/ia-prefixes",
+            get(handlers::ia_prefixes::list_ia_prefixes),
+        )
+        .route(
+            "/api/ia-prefixes",
+            post(handlers::ia_prefixes::create_ia_prefix),
+        )
+        .route(
+            "/api/ia-prefixes/:id",
+            get(handlers::ia_prefixes::get_ia_prefix),
+        )
+        .route(
+            "/api/ia-prefixes/:id",
+            put(handlers::ia_prefixes::update_ia_prefix),
+        )
+        .route(
+            "/api/ia-prefixes/:id",
+            delete(handlers::ia_prefixes::delete_ia_prefix),
         );
 
     // Apply authentication middleware only if required
@@ -114,7 +161,7 @@ pub fn create_router_with_auth(db: Arc<Database>, require_auth: bool) -> Router 
         .merge(protected_routes)
         // Health check - always public
         .route("/health", get(handlers::health::health_check))
-        .with_state(db);
+        .with_state(state);
 
     // Merge with Swagger UI
     let app =

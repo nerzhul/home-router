@@ -1,6 +1,6 @@
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, Row};
+use crate::models::{DynamicRange, IAPrefix, Lease, StaticIP, Subnet};
+use sqlx::{sqlite::SqliteConnectOptions, Row, SqlitePool};
 use std::str::FromStr;
-use crate::models::{Subnet, DynamicRange, StaticIP, Lease};
 
 pub struct Database {
     pool: SqlitePool,
@@ -9,22 +9,21 @@ pub struct Database {
 impl Database {
     /// Create a new database connection
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        let options = SqliteConnectOptions::from_str(database_url)?
-            .create_if_missing(true);
-        
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+
         let pool = SqlitePool::connect_with(options).await?;
-        
+
         // Run migrations
         sqlx::migrate!("./migrations").run(&pool).await?;
-        
+
         Ok(Self { pool })
     }
-    
+
     /// Get the underlying connection pool
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
-    
+
     // Subnet operations
     pub async fn create_subnet(&self, subnet: &Subnet) -> anyhow::Result<i64> {
         let dns_servers = subnet.dns_servers_to_string();
@@ -39,10 +38,10 @@ impl Database {
         .bind(subnet.enabled as i64)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn get_subnet(&self, id: i64) -> anyhow::Result<Option<Subnet>> {
         let row = sqlx::query(
             "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets WHERE id = ?"
@@ -50,7 +49,7 @@ impl Database {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(row.map(|r| Subnet {
             id: r.get("id"),
             network: r.get::<String, _>("network").parse().unwrap(),
@@ -61,25 +60,28 @@ impl Database {
             enabled: r.get::<i64, _>("enabled") != 0,
         }))
     }
-    
+
     pub async fn list_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
         let rows = sqlx::query(
-            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets"
+            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets",
         )
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().map(|r| Subnet {
-            id: r.get("id"),
-            network: r.get::<String, _>("network").parse().unwrap(),
-            netmask: r.get::<i64, _>("netmask") as u8,
-            gateway: r.get::<String, _>("gateway").parse().unwrap(),
-            dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
-            domain_name: r.get("domain_name"),
-            enabled: r.get::<i64, _>("enabled") != 0,
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| Subnet {
+                id: r.get("id"),
+                network: r.get::<String, _>("network").parse().unwrap(),
+                netmask: r.get::<i64, _>("netmask") as u8,
+                gateway: r.get::<String, _>("gateway").parse().unwrap(),
+                dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
+                domain_name: r.get("domain_name"),
+                enabled: r.get::<i64, _>("enabled") != 0,
+            })
+            .collect())
     }
-    
+
     pub async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()> {
         let dns_servers = subnet.dns_servers_to_string();
         sqlx::query(
@@ -94,10 +96,10 @@ impl Database {
         .bind(id)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
+
     pub async fn delete_subnet(&self, id: i64) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM subnets WHERE id = ?")
             .bind(id)
@@ -105,7 +107,7 @@ impl Database {
             .await?;
         Ok(())
     }
-    
+
     // Dynamic Range operations
     pub async fn create_range(&self, range: &DynamicRange) -> anyhow::Result<i64> {
         let result = sqlx::query(
@@ -117,10 +119,10 @@ impl Database {
         .bind(range.enabled as i64)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn list_ranges(&self, subnet_id: Option<i64>) -> anyhow::Result<Vec<DynamicRange>> {
         let rows = if let Some(subnet_id) = subnet_id {
             sqlx::query(
@@ -130,22 +132,23 @@ impl Database {
             .fetch_all(&self.pool)
             .await?
         } else {
-            sqlx::query(
-                "SELECT id, subnet_id, range_start, range_end, enabled FROM dynamic_ranges"
-            )
-            .fetch_all(&self.pool)
-            .await?
+            sqlx::query("SELECT id, subnet_id, range_start, range_end, enabled FROM dynamic_ranges")
+                .fetch_all(&self.pool)
+                .await?
         };
-        
-        Ok(rows.into_iter().map(|r| DynamicRange {
-            id: r.get("id"),
-            subnet_id: r.get("subnet_id"),
-            range_start: r.get::<String, _>("range_start").parse().unwrap(),
-            range_end: r.get::<String, _>("range_end").parse().unwrap(),
-            enabled: r.get::<i64, _>("enabled") != 0,
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| DynamicRange {
+                id: r.get("id"),
+                subnet_id: r.get("subnet_id"),
+                range_start: r.get::<String, _>("range_start").parse().unwrap(),
+                range_end: r.get::<String, _>("range_end").parse().unwrap(),
+                enabled: r.get::<i64, _>("enabled") != 0,
+            })
+            .collect())
     }
-    
+
     pub async fn delete_range(&self, id: i64) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM dynamic_ranges WHERE id = ?")
             .bind(id)
@@ -153,7 +156,7 @@ impl Database {
             .await?;
         Ok(())
     }
-    
+
     // Static IP operations
     pub async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<i64> {
         let result = sqlx::query(
@@ -166,10 +169,10 @@ impl Database {
         .bind(static_ip.enabled as i64)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn list_static_ips(&self, subnet_id: Option<i64>) -> anyhow::Result<Vec<StaticIP>> {
         let rows = if let Some(subnet_id) = subnet_id {
             sqlx::query(
@@ -180,22 +183,25 @@ impl Database {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips"
+                "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips",
             )
             .fetch_all(&self.pool)
             .await?
         };
-        
-        Ok(rows.into_iter().map(|r| StaticIP {
-            id: r.get("id"),
-            subnet_id: r.get("subnet_id"),
-            mac_address: r.get("mac_address"),
-            ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
-            hostname: r.get("hostname"),
-            enabled: r.get::<i64, _>("enabled") != 0,
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| StaticIP {
+                id: r.get("id"),
+                subnet_id: r.get("subnet_id"),
+                mac_address: r.get("mac_address"),
+                ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
+                hostname: r.get("hostname"),
+                enabled: r.get::<i64, _>("enabled") != 0,
+            })
+            .collect())
     }
-    
+
     pub async fn get_static_ip_by_mac(&self, mac: &str) -> anyhow::Result<Option<StaticIP>> {
         let row = sqlx::query(
             "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips WHERE mac_address = ? AND enabled = 1"
@@ -203,7 +209,7 @@ impl Database {
         .bind(mac)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(row.map(|r| StaticIP {
             id: r.get("id"),
             subnet_id: r.get("subnet_id"),
@@ -213,7 +219,7 @@ impl Database {
             enabled: r.get::<i64, _>("enabled") != 0,
         }))
     }
-    
+
     pub async fn delete_static_ip(&self, id: i64) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM static_ips WHERE id = ?")
             .bind(id)
@@ -221,7 +227,7 @@ impl Database {
             .await?;
         Ok(())
     }
-    
+
     // Lease operations
     pub async fn create_lease(&self, lease: &Lease) -> anyhow::Result<i64> {
         let result = sqlx::query(
@@ -236,10 +242,10 @@ impl Database {
         .bind(lease.active as i64)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn get_active_lease(&self, mac: &str) -> anyhow::Result<Option<Lease>> {
         let now = chrono::Utc::now().timestamp();
         let row = sqlx::query(
@@ -249,7 +255,7 @@ impl Database {
         .bind(now)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(row.map(|r| Lease {
             id: r.get("id"),
             subnet_id: r.get("subnet_id"),
@@ -261,7 +267,7 @@ impl Database {
             active: r.get::<i64, _>("active") != 0,
         }))
     }
-    
+
     pub async fn list_active_leases(&self) -> anyhow::Result<Vec<Lease>> {
         let now = chrono::Utc::now().timestamp();
         let rows = sqlx::query(
@@ -270,21 +276,148 @@ impl Database {
         .bind(now)
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().map(|r| Lease {
-            id: r.get("id"),
-            subnet_id: r.get("subnet_id"),
-            mac_address: r.get("mac_address"),
-            ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
-            lease_start: r.get("lease_start"),
-            lease_end: r.get("lease_end"),
-            hostname: r.get("hostname"),
-            active: r.get::<i64, _>("active") != 0,
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| Lease {
+                id: r.get("id"),
+                subnet_id: r.get("subnet_id"),
+                mac_address: r.get("mac_address"),
+                ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
+                lease_start: r.get("lease_start"),
+                lease_end: r.get("lease_end"),
+                hostname: r.get("hostname"),
+                active: r.get::<i64, _>("active") != 0,
+            })
+            .collect())
     }
-    
+
     pub async fn expire_lease(&self, id: i64) -> anyhow::Result<()> {
         sqlx::query("UPDATE leases SET active = 0 WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // IPv6 Prefix (IA Prefix) operations for Router Advertisement
+    pub async fn create_ia_prefix(&self, prefix: &IAPrefix) -> anyhow::Result<i64> {
+        let dns_servers = prefix.dns_servers_to_string();
+        let result = sqlx::query(
+            "INSERT INTO ia_prefixes (interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&prefix.interface)
+        .bind(prefix.prefix.to_string())
+        .bind(prefix.prefix_len as i64)
+        .bind(prefix.preferred_lifetime as i64)
+        .bind(prefix.valid_lifetime as i64)
+        .bind(dns_servers)
+        .bind(prefix.dns_lifetime as i64)
+        .bind(prefix.enabled as i64)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    pub async fn get_ia_prefix(&self, id: i64) -> anyhow::Result<Option<IAPrefix>> {
+        let row = sqlx::query(
+            "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| IAPrefix {
+            id: r.get("id"),
+            interface: r.get("interface"),
+            prefix: r.get::<String, _>("prefix").parse().unwrap(),
+            prefix_len: r.get::<i64, _>("prefix_len") as u8,
+            preferred_lifetime: r.get::<i64, _>("preferred_lifetime") as u32,
+            valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
+            dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
+            dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
+            enabled: r.get::<i64, _>("enabled") != 0,
+        }))
+    }
+
+    pub async fn list_ia_prefixes(&self, interface: Option<&str>) -> anyhow::Result<Vec<IAPrefix>> {
+        let rows = if let Some(interface) = interface {
+            sqlx::query(
+                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE interface = ?"
+            )
+            .bind(interface)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes"
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|r| IAPrefix {
+                id: r.get("id"),
+                interface: r.get("interface"),
+                prefix: r.get::<String, _>("prefix").parse().unwrap(),
+                prefix_len: r.get::<i64, _>("prefix_len") as u8,
+                preferred_lifetime: r.get::<i64, _>("preferred_lifetime") as u32,
+                valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
+                dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
+                dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
+                enabled: r.get::<i64, _>("enabled") != 0,
+            })
+            .collect())
+    }
+
+    pub async fn list_enabled_ia_prefixes(&self) -> anyhow::Result<Vec<IAPrefix>> {
+        let rows = sqlx::query(
+            "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE enabled = 1"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| IAPrefix {
+                id: r.get("id"),
+                interface: r.get("interface"),
+                prefix: r.get::<String, _>("prefix").parse().unwrap(),
+                prefix_len: r.get::<i64, _>("prefix_len") as u8,
+                preferred_lifetime: r.get::<i64, _>("preferred_lifetime") as u32,
+                valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
+                dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
+                dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
+                enabled: r.get::<i64, _>("enabled") != 0,
+            })
+            .collect())
+    }
+
+    pub async fn update_ia_prefix(&self, id: i64, prefix: &IAPrefix) -> anyhow::Result<()> {
+        let dns_servers = prefix.dns_servers_to_string();
+        sqlx::query(
+            "UPDATE ia_prefixes SET interface = ?, prefix = ?, prefix_len = ?, preferred_lifetime = ?, valid_lifetime = ?, dns_servers = ?, dns_lifetime = ?, enabled = ? WHERE id = ?"
+        )
+        .bind(&prefix.interface)
+        .bind(prefix.prefix.to_string())
+        .bind(prefix.prefix_len as i64)
+        .bind(prefix.preferred_lifetime as i64)
+        .bind(prefix.valid_lifetime as i64)
+        .bind(dns_servers)
+        .bind(prefix.dns_lifetime as i64)
+        .bind(prefix.enabled as i64)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_ia_prefix(&self, id: i64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ia_prefixes WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

@@ -16,6 +16,10 @@ pub struct Config {
 
     /// DHCP server configuration
     pub dhcp: DhcpConfig,
+
+    /// Router Advertisement (IPv6) configuration
+    #[serde(default)]
+    pub ra: Option<RaConfig>,
 }
 
 fn default_db_path() -> String {
@@ -72,6 +76,44 @@ fn default_max_lease_time() -> u32 {
     604800 // 7 days
 }
 
+/// Router Advertisement (IPv6) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaConfig {
+    /// Default preferred lifetime in seconds
+    #[serde(default = "default_ra_preferred_lifetime")]
+    pub default_preferred_lifetime: u32,
+
+    /// Default valid lifetime in seconds
+    #[serde(default = "default_ra_valid_lifetime")]
+    pub default_valid_lifetime: u32,
+
+    /// Default DNS lifetime in seconds (RDNSS option)
+    #[serde(default = "default_ra_dns_lifetime")]
+    pub default_dns_lifetime: u32,
+}
+
+fn default_ra_preferred_lifetime() -> u32 {
+    86400 // 24 hours
+}
+
+fn default_ra_valid_lifetime() -> u32 {
+    2592000 // 30 days
+}
+
+fn default_ra_dns_lifetime() -> u32 {
+    86400 // 24 hours
+}
+
+impl Default for RaConfig {
+    fn default() -> Self {
+        Self {
+            default_preferred_lifetime: default_ra_preferred_lifetime(),
+            default_valid_lifetime: default_ra_valid_lifetime(),
+            default_dns_lifetime: default_ra_dns_lifetime(),
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from a YAML file
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
@@ -103,6 +145,7 @@ impl Default for Config {
                 default_lease_time: default_lease_time(),
                 max_lease_time: default_max_lease_time(),
             },
+            ra: None,
         }
     }
 }

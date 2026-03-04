@@ -4,13 +4,12 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use std::sync::Arc;
 use tracing::error;
 
 use crate::{
     auth::{generate_token, hash_token},
-    db::Database,
     models::{ApiToken, CreateTokenRequest, CreateTokenResponse},
+    AppState,
 };
 
 /// List all API tokens
@@ -24,12 +23,12 @@ use crate::{
     tag = "tokens"
 )]
 pub async fn list_tokens(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<ApiToken>>, impl IntoResponse> {
     match sqlx::query_as::<_, (i64, String, i64, Option<i64>, bool)>(
-        "SELECT id, name, created_at, last_used_at, enabled FROM api_tokens ORDER BY created_at DESC"
+        "SELECT id, name, created_at, last_used_at, enabled FROM api_tokens ORDER BY created_at DESC",
     )
-    .fetch_all(db.pool())
+    .fetch_all(state.db.pool())
     .await
     {
         Ok(records) => {
@@ -68,7 +67,7 @@ pub async fn list_tokens(
     tag = "tokens"
 )]
 pub async fn create_token(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Json(request): Json<CreateTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateTokenResponse>), impl IntoResponse> {
     // Generate token
@@ -85,7 +84,7 @@ pub async fn create_token(
         .bind(&request.name)
         .bind(&token_hash)
         .bind(&salt)
-        .execute(db.pool())
+        .execute(state.db.pool())
         .await
     {
         Ok(result) => {
@@ -118,12 +117,12 @@ pub async fn create_token(
     tag = "tokens"
 )]
 pub async fn delete_token(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, impl IntoResponse> {
     match sqlx::query("DELETE FROM api_tokens WHERE id = ?")
         .bind(id)
-        .execute(db.pool())
+        .execute(state.db.pool())
         .await
     {
         Ok(result) => {
@@ -155,14 +154,14 @@ pub async fn delete_token(
     tag = "tokens"
 )]
 pub async fn toggle_token(
-    State(db): State<Arc<Database>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, impl IntoResponse> {
     match sqlx::query(
         "UPDATE api_tokens SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?",
     )
     .bind(id)
-    .execute(db.pool())
+    .execute(state.db.pool())
     .await
     {
         Ok(result) => {
