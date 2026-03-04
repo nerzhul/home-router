@@ -4,18 +4,18 @@ use tracing::{debug, error, info, warn};
 
 use super::packet::{DhcpOption, DhcpPacket, MessageType};
 use crate::config::Config;
-use crate::db::Database;
+use crate::db::{Database, DynDatabase};
 
 const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
 
 pub struct DhcpServer {
     config: Arc<Config>,
-    db: Arc<Database>,
+    db: DynDatabase,
 }
 
 impl DhcpServer {
-    pub fn new(config: Arc<Config>, db: Arc<Database>) -> Self {
+    pub fn new(config: Arc<Config>, db: DynDatabase) -> Self {
         Self { config, db }
     }
 
@@ -46,7 +46,7 @@ impl DhcpServer {
     async fn listen_loop(
         addr: SocketAddr,
         config: Arc<Config>,
-        db: Arc<Database>,
+        db: DynDatabase,
     ) -> anyhow::Result<()> {
         let socket = UdpSocket::bind(addr)?;
         socket.set_broadcast(true)?;
@@ -71,7 +71,7 @@ impl DhcpServer {
             };
 
             // Handle packet
-            let response = Self::handle_packet(&packet, &config, &db).await;
+            let response = Self::handle_packet(&packet, &config, &*db).await;
 
             if let Some(response_packet) = response {
                 let response_bytes = response_packet.to_bytes();
@@ -88,7 +88,7 @@ impl DhcpServer {
     async fn handle_packet(
         packet: &DhcpPacket,
         config: &Config,
-        db: &Database,
+        db: &dyn Database,
     ) -> Option<DhcpPacket> {
         let msg_type = packet.get_message_type()?;
         let mac = packet.chaddr.to_string();
@@ -121,7 +121,7 @@ impl DhcpServer {
     async fn handle_discover(
         packet: &DhcpPacket,
         config: &Config,
-        db: &Database,
+        db: &dyn Database,
     ) -> Option<DhcpPacket> {
         let mac = packet.chaddr.to_string();
 
@@ -157,7 +157,7 @@ impl DhcpServer {
     async fn handle_request(
         packet: &DhcpPacket,
         config: &Config,
-        db: &Database,
+        db: &dyn Database,
     ) -> Option<DhcpPacket> {
         let mac = packet.chaddr.to_string();
 
@@ -183,7 +183,7 @@ impl DhcpServer {
         None
     }
 
-    async fn handle_release(packet: &DhcpPacket, db: &Database) {
+    async fn handle_release(packet: &DhcpPacket, db: &dyn Database) {
         let mac = packet.chaddr.to_string();
 
         if let Ok(Some(lease)) = db.get_active_lease(&mac).await {
@@ -294,13 +294,14 @@ impl DhcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::InMemoryDatabase;
     use crate::dhcp::test_helpers::*;
     use crate::models::{Lease, StaticIP};
 
     #[tokio::test]
     async fn test_handle_discover_with_static_ip() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -337,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_discover_with_existing_lease() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -375,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_discover_no_allocation() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet but no static IP or lease
         let subnet = create_test_subnet();
@@ -394,7 +395,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_discover_static_ip_takes_precedence() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -440,7 +441,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_request_with_static_ip() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -477,7 +478,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_request_with_wrong_static_ip() {
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -508,7 +509,7 @@ mod tests {
         use dhcp_proto::MacAddress;
 
         let config = create_test_config();
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -531,7 +532,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_release_with_active_lease() {
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet
         let subnet = create_test_subnet();
@@ -568,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_release_without_lease() {
-        let db = Database::new(":memory:").await.unwrap();
+        let db = InMemoryDatabase::new();
 
         // Create subnet (for completeness)
         let subnet = create_test_subnet();

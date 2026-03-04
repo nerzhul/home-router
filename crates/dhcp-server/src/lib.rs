@@ -7,6 +7,7 @@ pub mod models;
 pub mod routes;
 
 pub use config::{Config, RaConfig};
+pub use db::{create_database, Database, DynDatabase, InMemoryDatabase, SqliteDatabase};
 pub use models::{DynamicRange, IAPrefix, StaticIP, Subnet};
 
 use axum::{
@@ -14,7 +15,6 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Router,
 };
-use db::Database;
 use std::sync::Arc;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -70,22 +70,22 @@ pub struct ApiDoc;
 /// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {
-    pub db: Arc<Database>,
+    pub db: DynDatabase,
     pub ra_config: Arc<RaConfig>,
 }
 
 impl AppState {
-    pub fn new(db: Arc<Database>, ra_config: Arc<RaConfig>) -> Self {
+    pub fn new(db: DynDatabase, ra_config: Arc<RaConfig>) -> Self {
         Self { db, ra_config }
     }
 }
 
-pub fn create_router(db: Arc<Database>, ra_config: Arc<RaConfig>) -> Router {
+pub fn create_router(db: DynDatabase, ra_config: Arc<RaConfig>) -> Router {
     create_router_with_auth(db, ra_config, false)
 }
 
 pub fn create_router_with_auth(
-    db: Arc<Database>,
+    db: DynDatabase,
     ra_config: Arc<RaConfig>,
     require_auth: bool,
 ) -> Router {

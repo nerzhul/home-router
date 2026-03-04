@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use dhcp_server::{
-    config::RaConfig, create_router_with_auth, db::Database, dhcp::DhcpServer, Config,
+    config::RaConfig, create_database, create_router_with_auth, dhcp::DhcpServer, Config,
 };
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -91,10 +91,10 @@ async fn main() -> Result<()> {
 
     // Initialize database
     let db_url = format!("sqlite:{}", config.database_path);
-    let db = match Database::new(&db_url).await {
+    let db = match create_database(&db_url).await {
         Ok(database) => {
             info!("Database initialized at {}", config.database_path);
-            Arc::new(database)
+            database
         }
         Err(e) => {
             error!("Failed to initialize database: {}", e);

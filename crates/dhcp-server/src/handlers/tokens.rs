@@ -25,28 +25,8 @@ use crate::{
 pub async fn list_tokens(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApiToken>>, impl IntoResponse> {
-    match sqlx::query_as::<_, (i64, String, i64, Option<i64>, bool)>(
-        "SELECT id, name, created_at, last_used_at, enabled FROM api_tokens ORDER BY created_at DESC",
-    )
-    .fetch_all(state.db.pool())
-    .await
-    {
-        Ok(records) => {
-            let tokens: Vec<ApiToken> = records
-                .into_iter()
-                .map(|(id, name, created_at, last_used_at, enabled)| ApiToken {
-                    id: Some(id),
-                    name,
-                    token_hash: None,
-                    salt: None,
-                    created_at: Some(created_at),
-                    last_used_at,
-                    enabled,
-                    token: None,
-                })
-                .collect();
-            Ok(Json(tokens))
-        }
+    match state.db.list_api_tokens().await {
+        Ok(tokens) => Ok(Json(tokens)),
         Err(e) => {
             error!("Failed to list tokens: {}", e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to list tokens"))
@@ -70,26 +50,20 @@ pub async fn create_token(
     State(state): State<AppState>,
     Json(request): Json<CreateTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateTokenResponse>), impl IntoResponse> {
-    // Generate token
     let token = generate_token();
-
-    // Hash token
     let (token_hash, salt) = hash_token(&token).map_err(|e| {
         error!("Failed to hash token: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash token")
     })?;
 
-    // Insert into database
-    match sqlx::query("INSERT INTO api_tokens (name, token_hash, salt) VALUES (?, ?, ?)")
-        .bind(&request.name)
-        .bind(&token_hash)
-        .bind(&salt)
-        .execute(state.db.pool())
+    match state
+        .db
+        .create_token(&request.name, &token_hash, &salt)
         .await
     {
-        Ok(result) => {
+        Ok(id) => {
             let response = CreateTokenResponse {
-                id: result.last_insert_rowid(),
+                id,
                 name: request.name,
                 token,
             };
@@ -111,7 +85,6 @@ pub async fn create_token(
     ),
     responses(
         (status = 204, description = "Token deleted successfully"),
-        (status = 404, description = "Token not found"),
         (status = 500, description = "Internal server error")
     ),
     tag = "tokens"
@@ -120,18 +93,8 @@ pub async fn delete_token(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, impl IntoResponse> {
-    match sqlx::query("DELETE FROM api_tokens WHERE id = ?")
-        .bind(id)
-        .execute(state.db.pool())
-        .await
-    {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
-                Err((StatusCode::NOT_FOUND, "Token not found"))
-            } else {
-                Ok(StatusCode::NO_CONTENT)
-            }
-        }
+    match state.db.delete_token(id).await {
+        Ok(_) => Ok(StatusCode::NO_CONTENT),
         Err(e) => {
             error!("Failed to delete token: {}", e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete token"))
@@ -157,23 +120,21 @@ pub async fn toggle_token(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, impl IntoResponse> {
-    match sqlx::query(
-        "UPDATE api_tokens SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?",
-    )
-    .bind(id)
-    .execute(state.db.pool())
-    .await
-    {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
-                Err((StatusCode::NOT_FOUND, "Token not found"))
-            } else {
-                Ok(StatusCode::OK)
+    // Get current state to determine the flip
+    let tokens = state.db.list_api_tokens().await.map_err(|e| {
+        error!("Failed to list tokens: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to toggle token")
+    })?;
+
+    let current = tokens.iter().find(|t| t.id == Some(id));
+    match current {
+        None => Err((StatusCode::NOT_FOUND, "Token not found")),
+        Some(token) => match state.db.toggle_token(id, !token.enabled).await {
+            Ok(_) => Ok(StatusCode::OK),
+            Err(e) => {
+                error!("Failed to toggle token: {}", e);
+                Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to toggle token"))
             }
-        }
-        Err(e) => {
-            error!("Failed to toggle token: {}", e);
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to toggle token"))
-        }
+        },
     }
 }

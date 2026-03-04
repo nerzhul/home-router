@@ -10,10 +10,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{engine::general_purpose, Engine as _};
-use std::sync::Arc;
 use tracing::warn;
 
-use crate::db::Database;
+use crate::db::DynDatabase;
 
 const TOKEN_LENGTH: usize = 32;
 
@@ -56,7 +55,7 @@ pub enum ConnectionType {
 
 /// Middleware to check API authentication
 pub async fn auth_middleware(
-    State(db): State<Arc<Database>>,
+    State(db): State<DynDatabase>,
     headers: HeaderMap,
     request: Request,
     next: Next,
@@ -96,23 +95,12 @@ pub async fn auth_middleware(
 }
 
 /// Verify a token exists in the database and is enabled
-async fn verify_token_in_db(db: &Database, token: &str) -> Result<bool> {
-    let tokens = sqlx::query_as::<_, (String, i64)>(
-        "SELECT token_hash, enabled FROM api_tokens WHERE enabled = 1",
-    )
-    .fetch_all(db.pool())
-    .await?;
+async fn verify_token_in_db(db: &DynDatabase, token: &str) -> Result<bool> {
+    let tokens = db.list_tokens().await?;
 
     for (token_hash, enabled) in tokens {
         if verify_token(token, &token_hash)? {
-            // Update last_used_at
-            let _ = sqlx::query(
-                "UPDATE api_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
-            )
-            .bind(&token_hash)
-            .execute(db.pool())
-            .await;
-
+            let _ = db.update_token_last_used(&token_hash).await;
             return Ok(enabled == 1);
         }
     }
