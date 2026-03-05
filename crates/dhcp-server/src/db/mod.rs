@@ -30,6 +30,7 @@ pub trait Database: Send + Sync {
     async fn create_subnet(&self, subnet: &Subnet) -> anyhow::Result<i64>;
     async fn get_subnet(&self, id: i64) -> anyhow::Result<Option<Subnet>>;
     async fn list_subnets(&self) -> anyhow::Result<Vec<Subnet>>;
+    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>>;
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()>;
     async fn delete_subnet(&self, id: i64) -> anyhow::Result<()>;
 

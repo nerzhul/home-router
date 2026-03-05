@@ -88,6 +88,27 @@ impl Database for SqliteDatabase {
             .collect())
     }
 
+    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
+        let rows = sqlx::query(
+            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets WHERE enabled = 1",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| Subnet {
+                id: r.get("id"),
+                network: r.get::<String, _>("network").parse().unwrap(),
+                netmask: r.get::<i64, _>("netmask") as u8,
+                gateway: r.get::<String, _>("gateway").parse().unwrap(),
+                dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
+                domain_name: r.get("domain_name"),
+                enabled: true,
+            })
+            .collect())
+    }
+
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()> {
         let dns_servers = subnet.dns_servers_to_string();
         sqlx::query(

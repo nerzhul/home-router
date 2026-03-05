@@ -35,7 +35,10 @@ pub async fn list_ranges(
         .await
         .map(Json)
         .map_err(|e| {
-            error!("Failed to list ranges (subnet_id={:?}): {}", query.subnet_id, e);
+            error!(
+                "Failed to list ranges (subnet_id={:?}): {}",
+                query.subnet_id, e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
@@ -62,7 +65,10 @@ pub async fn create_range(
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|e| {
-            error!("Failed to create range (subnet_id={}, start={}, end={}): {}", range.subnet_id, range.range_start, range.range_end, e);
+            error!(
+                "Failed to create range (subnet_id={}, start={}, end={}): {}",
+                range.subnet_id, range.range_start, range.range_end, e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }

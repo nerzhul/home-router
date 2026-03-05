@@ -72,6 +72,11 @@ impl Database for InMemoryDatabase {
         Ok(subnets.clone())
     }
 
+    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
+        let subnets = self.subnets.read().await;
+        Ok(subnets.iter().filter(|s| s.enabled).cloned().collect())
+    }
+
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()> {
         let mut subnets = self.subnets.write().await;
         if let Some(existing) = subnets.iter_mut().find(|s| s.id == Some(id)) {

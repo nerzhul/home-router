@@ -13,13 +13,8 @@ use tracing::error;
     )
 )]
 pub async fn list_leases(State(state): State<AppState>) -> Result<Json<Vec<Lease>>, StatusCode> {
-    state
-        .db
-        .list_active_leases()
-        .await
-        .map(Json)
-        .map_err(|e| {
-            error!("Failed to list leases: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    state.db.list_active_leases().await.map(Json).map_err(|e| {
+        error!("Failed to list leases: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }

@@ -98,7 +98,8 @@ impl DhcpServer {
             };
 
             // Handle packet
-            let response = Self::handle_packet(&packet, &config, &*db).await;
+            let iface_ips = get_interface_ips(&interface);
+            let response = Self::handle_packet(&packet, &iface_ips, &config, &*db).await;
 
             if let Some(response_packet) = response {
                 let response_bytes = response_packet.to_bytes();
@@ -114,6 +115,7 @@ impl DhcpServer {
 
     async fn handle_packet(
         packet: &DhcpPacket,
+        iface_ips: &[Ipv4Addr],
         config: &Config,
         db: &dyn Database,
     ) -> Option<DhcpPacket> {
@@ -123,11 +125,11 @@ impl DhcpServer {
         match msg_type {
             MessageType::Discover => {
                 info!("DHCP DISCOVER from {}", mac);
-                Self::handle_discover(packet, config, db).await
+                Self::handle_discover(packet, iface_ips, config, db).await
             }
             MessageType::Request => {
                 info!("DHCP REQUEST from {}", mac);
-                Self::handle_request(packet, config, db).await
+                Self::handle_request(packet, iface_ips, config, db).await
             }
             MessageType::Release => {
                 info!("DHCP RELEASE from {}", mac);
@@ -147,40 +149,44 @@ impl DhcpServer {
 
     async fn handle_discover(
         packet: &DhcpPacket,
+        iface_ips: &[Ipv4Addr],
         config: &Config,
         db: &dyn Database,
     ) -> Option<DhcpPacket> {
         let mac = packet.chaddr.to_string();
 
-        // Check for static IP assignment
+        // Check for static IP assignment on a subnet reachable via this interface
         if let Ok(Some(static_ip)) = db.get_static_ip_by_mac(&mac).await {
             let subnet = db.get_subnet(static_ip.subnet_id).await.ok()??;
-
-            return Some(Self::create_offer(
-                packet,
-                static_ip.ip_address,
-                &subnet,
-                config,
-            ));
+            if iface_in_subnet(iface_ips, &subnet) {
+                return Some(Self::create_offer(
+                    packet,
+                    static_ip.ip_address,
+                    &subnet,
+                    config,
+                ));
+            }
         }
 
-        // Check for existing lease
+        // Check for an existing lease on a subnet reachable via this interface
         if let Ok(Some(lease)) = db.get_active_lease(&mac).await {
             let subnet = db.get_subnet(lease.subnet_id).await.ok()??;
-
-            return Some(Self::create_offer(
-                packet,
-                lease.ip_address,
-                &subnet,
-                config,
-            ));
+            if iface_in_subnet(iface_ips, &subnet) {
+                return Some(Self::create_offer(
+                    packet,
+                    lease.ip_address,
+                    &subnet,
+                    config,
+                ));
+            }
         }
 
-        // Allocate a new IP from an enabled dynamic range
-        let ranges = match db.list_ranges(None).await {
-            Ok(r) => r,
+        // Allocate a new IP from an enabled dynamic range, scoped to subnets
+        // reachable via this interface.
+        let subnets = match db.list_active_subnets().await {
+            Ok(s) => s,
             Err(e) => {
-                error!("Failed to list dynamic ranges: {}", e);
+                error!("Failed to list subnets: {}", e);
                 return None;
             }
         };
@@ -194,19 +200,29 @@ impl DhcpServer {
             }
         };
 
-        for range in ranges.iter().filter(|r| r.enabled) {
-            let start = u32::from(range.range_start);
-            let end = u32::from(range.range_end);
+        for subnet in subnets.iter().filter(|s| iface_in_subnet(iface_ips, s)) {
+            let subnet_id = match subnet.id {
+                Some(id) => id,
+                None => continue,
+            };
+            let ranges = match db.list_ranges(Some(subnet_id)).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to list ranges for subnet {}: {}", subnet_id, e);
+                    continue;
+                }
+            };
 
-            for ip_u32 in start..=end {
-                let candidate = Ipv4Addr::from(ip_u32);
-                if !leased_ips.contains(&candidate) {
-                    let subnet = match db.get_subnet(range.subnet_id).await {
-                        Ok(Some(s)) => s,
-                        _ => continue,
-                    };
-                    debug!("Offering dynamic IP {} to {}", candidate, mac);
-                    return Some(Self::create_offer(packet, candidate, &subnet, config));
+            for range in ranges.iter().filter(|r| r.enabled) {
+                let start = u32::from(range.range_start);
+                let end = u32::from(range.range_end);
+
+                for ip_u32 in start..=end {
+                    let candidate = Ipv4Addr::from(ip_u32);
+                    if !leased_ips.contains(&candidate) {
+                        debug!("Offering dynamic IP {} to {}", candidate, mac);
+                        return Some(Self::create_offer(packet, candidate, subnet, config));
+                    }
                 }
             }
         }
@@ -217,6 +233,7 @@ impl DhcpServer {
 
     async fn handle_request(
         packet: &DhcpPacket,
+        iface_ips: &[Ipv4Addr],
         config: &Config,
         db: &dyn Database,
     ) -> Option<DhcpPacket> {
@@ -254,6 +271,13 @@ impl DhcpServer {
         if let Ok(Some(static_ip)) = db.get_static_ip_by_mac(&mac).await {
             if static_ip.ip_address == requested_ip {
                 let subnet = db.get_subnet(static_ip.subnet_id).await.ok()??;
+                if !iface_in_subnet(iface_ips, &subnet) {
+                    warn!(
+                        "Client {} static IP {} belongs to a subnet not reachable via this interface",
+                        mac, requested_ip
+                    );
+                    return None;
+                }
                 return Some(Self::create_ack(packet, requested_ip, &subnet, config));
             }
             // Static IP exists but client requested a different one: NAK
@@ -273,11 +297,26 @@ impl DhcpServer {
             }
         };
 
-        let matching_range = ranges.iter().find(|r| {
-            r.enabled
-                && u32::from(r.range_start) <= u32::from(requested_ip)
+        // Find a range that covers the requested IP and belongs to a subnet matching this interface
+        let mut matching_range_and_subnet = None;
+        for r in ranges.iter() {
+            if !r.enabled {
+                continue;
+            }
+            if u32::from(r.range_start) <= u32::from(requested_ip)
                 && u32::from(requested_ip) <= u32::from(r.range_end)
-        })?;
+            {
+                let subnet = match db.get_subnet(r.subnet_id).await {
+                    Ok(Some(s)) => s,
+                    _ => continue,
+                };
+                if iface_in_subnet(iface_ips, &subnet) {
+                    matching_range_and_subnet = Some((r.clone(), subnet));
+                    break;
+                }
+            }
+        }
+        let (matching_range, subnet) = matching_range_and_subnet?;
 
         // Verify the IP is not already leased by a different MAC
         let active_leases = match db.list_active_leases().await {
@@ -301,18 +340,6 @@ impl DhcpServer {
                 let _ = db.expire_lease(id).await;
             }
         }
-
-        // Retrieve the subnet for this range
-        let subnet = match db.get_subnet(matching_range.subnet_id).await {
-            Ok(Some(s)) => s,
-            _ => {
-                error!(
-                    "Subnet {} not found for dynamic range",
-                    matching_range.subnet_id
-                );
-                return None;
-            }
-        };
 
         // Create the lease
         let now = chrono::Utc::now().timestamp();
@@ -447,12 +474,117 @@ impl DhcpServer {
     }
 }
 
+/// Returns the IPv4 addresses assigned to the given network interface.
+fn get_interface_ips(interface: &str) -> Vec<Ipv4Addr> {
+    let mut ips = Vec::new();
+    unsafe {
+        let mut ifaddrs: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifaddrs) != 0 {
+            return ips;
+        }
+        let mut cur = ifaddrs;
+        while !cur.is_null() {
+            let ifa = &*cur;
+            if !ifa.ifa_addr.is_null() {
+                let name = std::ffi::CStr::from_ptr(ifa.ifa_name).to_string_lossy();
+                if name == interface && (*ifa.ifa_addr).sa_family as i32 == libc::AF_INET {
+                    let sin = ifa.ifa_addr as *const libc::sockaddr_in;
+                    let ip = u32::from_be((*sin).sin_addr.s_addr);
+                    ips.push(Ipv4Addr::from(ip));
+                }
+            }
+            cur = ifa.ifa_next;
+        }
+        libc::freeifaddrs(ifaddrs);
+    }
+    ips
+}
+
+/// Returns true if any IP on the interface belongs to the given subnet.
+fn iface_in_subnet(iface_ips: &[Ipv4Addr], subnet: &crate::models::Subnet) -> bool {
+    let mask: u32 = if subnet.netmask == 0 {
+        0
+    } else {
+        !0u32 << (32 - subnet.netmask)
+    };
+    let net = u32::from(subnet.network) & mask;
+    iface_ips.iter().any(|ip| u32::from(*ip) & mask == net)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::InMemoryDatabase;
     use crate::dhcp::test_helpers::*;
     use crate::models::{Lease, StaticIP};
+
+    fn make_subnet(network: Ipv4Addr, netmask: u8) -> crate::models::Subnet {
+        crate::models::Subnet {
+            id: None,
+            network,
+            netmask,
+            gateway: network,
+            dns_servers: vec![],
+            domain_name: None,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn test_iface_in_subnet_match() {
+        let subnet = make_subnet(Ipv4Addr::new(192, 168, 1, 0), 24);
+        assert!(iface_in_subnet(&[Ipv4Addr::new(192, 168, 1, 1)], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_last_address() {
+        let subnet = make_subnet(Ipv4Addr::new(192, 168, 1, 0), 24);
+        assert!(iface_in_subnet(&[Ipv4Addr::new(192, 168, 1, 254)], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_no_match() {
+        let subnet = make_subnet(Ipv4Addr::new(192, 168, 1, 0), 24);
+        assert!(!iface_in_subnet(&[Ipv4Addr::new(10, 0, 0, 1)], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_empty_ips() {
+        let subnet = make_subnet(Ipv4Addr::new(192, 168, 1, 0), 24);
+        assert!(!iface_in_subnet(&[], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_multiple_ips_one_matches() {
+        let subnet = make_subnet(Ipv4Addr::new(10, 0, 0, 0), 8);
+        let ips = [Ipv4Addr::new(192, 168, 1, 1), Ipv4Addr::new(10, 5, 6, 7)];
+        assert!(iface_in_subnet(&ips, &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_slash16() {
+        let subnet = make_subnet(Ipv4Addr::new(172, 16, 0, 0), 16);
+        assert!(iface_in_subnet(&[Ipv4Addr::new(172, 16, 42, 1)], &subnet));
+        assert!(!iface_in_subnet(&[Ipv4Addr::new(172, 17, 0, 1)], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_slash32() {
+        let subnet = make_subnet(Ipv4Addr::new(10, 0, 0, 1), 32);
+        assert!(iface_in_subnet(&[Ipv4Addr::new(10, 0, 0, 1)], &subnet));
+        assert!(!iface_in_subnet(&[Ipv4Addr::new(10, 0, 0, 2)], &subnet));
+    }
+
+    #[test]
+    fn test_iface_in_subnet_slash0() {
+        // /0 matches everything
+        let subnet = make_subnet(Ipv4Addr::new(0, 0, 0, 0), 0);
+        assert!(iface_in_subnet(&[Ipv4Addr::new(1, 2, 3, 4)], &subnet));
+        assert!(iface_in_subnet(
+            &[Ipv4Addr::new(255, 255, 255, 255)],
+            &subnet
+        ));
+    }
 
     #[tokio::test]
     async fn test_handle_discover_with_static_ip() {
@@ -478,7 +610,9 @@ mod tests {
         let packet = create_discover_packet("AA:BB:CC:DD:EE:FF");
 
         // Test handle_discover
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let offer = response.unwrap();
@@ -518,7 +652,9 @@ mod tests {
         let packet = create_discover_packet("11:22:33:44:55:66");
 
         // Test handle_discover
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let offer = response.unwrap();
@@ -542,7 +678,9 @@ mod tests {
         let packet = create_discover_packet("99:88:77:66:55:44");
 
         // Test handle_discover
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         // Should return None: no static IP, no lease, and no dynamic ranges
         assert!(response.is_none());
@@ -586,7 +724,9 @@ mod tests {
         let packet = create_discover_packet("AA:BB:CC:DD:EE:00");
 
         // Test handle_discover - static IP should take precedence
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let offer = response.unwrap();
@@ -613,7 +753,9 @@ mod tests {
         db.create_range(&range).await.unwrap();
 
         let packet = create_discover_packet("AA:BB:CC:DD:EE:11");
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let offer = response.unwrap();
@@ -654,7 +796,9 @@ mod tests {
         db.create_lease(&lease).await.unwrap();
 
         let packet = create_discover_packet("AA:BB:CC:DD:EE:22");
-        let response = DhcpServer::handle_discover(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_discover(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         // Should skip .100 (leased) and offer .101
@@ -680,7 +824,9 @@ mod tests {
 
         let requested = Ipv4Addr::new(192, 168, 1, 100);
         let packet = create_request_packet("AA:BB:CC:DD:EE:33", requested);
-        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_request(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let ack = response.unwrap();
@@ -725,7 +871,9 @@ mod tests {
         db.create_lease(&existing).await.unwrap();
 
         let packet = create_request_packet("AA:BB:CC:DD:EE:44", Ipv4Addr::new(192, 168, 1, 100));
-        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_request(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         // Should be rejected
         assert!(response.is_none());
@@ -755,7 +903,9 @@ mod tests {
         let packet = create_request_packet("AA:BB:CC:DD:EE:FF", Ipv4Addr::new(192, 168, 1, 50));
 
         // Test handle_request
-        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_request(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_some());
         let ack = response.unwrap();
@@ -792,7 +942,9 @@ mod tests {
         let packet = create_request_packet("AA:BB:CC:DD:EE:FF", Ipv4Addr::new(192, 168, 1, 100));
 
         // Test handle_request - should return None as requested IP doesn't match static IP
-        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_request(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_none());
     }
@@ -818,7 +970,9 @@ mod tests {
             .push(DhcpOption::MessageType(MessageType::Request));
 
         // Test handle_request - should return None without requested IP
-        let response = DhcpServer::handle_request(&packet, &config, &db).await;
+        let response =
+            DhcpServer::handle_request(&packet, &[Ipv4Addr::new(192, 168, 1, 1)], &config, &db)
+                .await;
 
         assert!(response.is_none());
     }

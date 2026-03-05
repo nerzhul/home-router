@@ -92,6 +92,18 @@ pub(crate) mod suite {
         assert!(list.len() >= 2);
     }
 
+    pub async fn test_list_active_subnets(db: &dyn Database) {
+        let mut disabled = subnet(6);
+        disabled.enabled = false;
+
+        db.create_subnet(&subnet(7)).await.unwrap();
+        let disabled_id = db.create_subnet(&disabled).await.unwrap();
+
+        let active = db.list_active_subnets().await.unwrap();
+        assert!(active.iter().all(|s| s.enabled));
+        assert!(!active.iter().any(|s| s.id == Some(disabled_id)));
+    }
+
     pub async fn test_update_subnet(db: &dyn Database) {
         let id = db.create_subnet(&subnet(4)).await.unwrap();
 
@@ -382,6 +394,7 @@ pub(crate) mod suite {
     pub async fn run_all(db: &dyn Database) {
         test_create_and_get_subnet(db).await;
         test_list_subnets(db).await;
+        test_list_active_subnets(db).await;
         test_update_subnet(db).await;
         test_delete_subnet(db).await;
         test_get_subnet_not_found(db).await;
