@@ -1,4 +1,4 @@
-use crate::{models::Subnet, AppState};
+use crate::{db::is_unique_violation, models::Subnet, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -17,15 +17,10 @@ use tracing::error;
     )
 )]
 pub async fn list_subnets(State(state): State<AppState>) -> Result<Json<Vec<Subnet>>, StatusCode> {
-    state
-        .db
-        .list_subnets()
-        .await
-        .map(Json)
-        .map_err(|e| {
-            error!("Failed to list subnets: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    state.db.list_subnets().await.map(Json).map_err(|e| {
+        error!("Failed to list subnets: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 /// Create a new subnet
@@ -37,6 +32,7 @@ pub async fn list_subnets(State(state): State<AppState>) -> Result<Json<Vec<Subn
     responses(
         (status = 201, description = "Subnet created", body = i64),
         (status = 400, description = "Bad request"),
+        (status = 409, description = "Subnet already exists"),
         (status = 500, description = "Internal server error")
     )
 )]
@@ -50,7 +46,13 @@ pub async fn create_subnet(
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|e| {
-            error!("Failed to create subnet (network={}/{}, gateway={}): {}", subnet.network, subnet.netmask, subnet.gateway, e);
+            if is_unique_violation(&e) {
+                return StatusCode::CONFLICT;
+            }
+            error!(
+                "Failed to create subnet (network={}/{}, gateway={}): {}",
+                subnet.network, subnet.netmask, subnet.gateway, e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }

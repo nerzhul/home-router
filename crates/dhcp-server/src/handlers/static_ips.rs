@@ -1,4 +1,4 @@
-use crate::{models::StaticIP, AppState};
+use crate::{db::is_unique_violation, models::StaticIP, AppState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -35,7 +35,10 @@ pub async fn list_static_ips(
         .await
         .map(Json)
         .map_err(|e| {
-            error!("Failed to list static IPs (subnet_id={:?}): {}", query.subnet_id, e);
+            error!(
+                "Failed to list static IPs (subnet_id={:?}): {}",
+                query.subnet_id, e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
@@ -49,6 +52,7 @@ pub async fn list_static_ips(
     responses(
         (status = 201, description = "Static IP created", body = i64),
         (status = 400, description = "Bad request"),
+        (status = 409, description = "Static IP already exists (duplicate MAC or IP)"),
         (status = 500, description = "Internal server error")
     )
 )]
@@ -62,7 +66,13 @@ pub async fn create_static_ip(
         .await
         .map(|id| (StatusCode::CREATED, Json(id)))
         .map_err(|e| {
-            error!("Failed to create static IP (subnet_id={}, mac={}, ip={}): {}", static_ip.subnet_id, static_ip.mac_address, static_ip.ip_address, e);
+            if is_unique_violation(&e) {
+                return StatusCode::CONFLICT;
+            }
+            error!(
+                "Failed to create static IP (subnet_id={}, mac={}, ip={}): {}",
+                static_ip.subnet_id, static_ip.mac_address, static_ip.ip_address, e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }

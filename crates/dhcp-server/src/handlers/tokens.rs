@@ -8,6 +8,7 @@ use tracing::error;
 
 use crate::{
     auth::{generate_token, hash_token},
+    db::is_unique_violation,
     models::{ApiToken, CreateTokenRequest, CreateTokenResponse},
     AppState,
 };
@@ -42,6 +43,7 @@ pub async fn list_tokens(
     responses(
         (status = 201, description = "Token created successfully", body = CreateTokenResponse),
         (status = 400, description = "Bad request"),
+        (status = 409, description = "Token name already exists"),
         (status = 500, description = "Internal server error")
     ),
     tag = "tokens"
@@ -70,6 +72,9 @@ pub async fn create_token(
             Ok((StatusCode::CREATED, Json(response)))
         }
         Err(e) => {
+            if is_unique_violation(&e) {
+                return Err((StatusCode::CONFLICT, "Token name already exists"));
+            }
             error!("Failed to create token: {}", e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to create token"))
         }

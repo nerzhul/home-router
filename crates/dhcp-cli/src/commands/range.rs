@@ -1,4 +1,4 @@
-use crate::client::ApiClient;
+use crate::client::{AlreadyExistsError, ApiClient};
 use crate::RangeCommands;
 use anyhow::Result;
 use dhcp_server::models::DynamicRange;
@@ -61,7 +61,16 @@ async fn create(client: ApiClient, subnet_id: i64, start: String, end: String) -
         enabled: true,
     };
 
-    let id: i64 = client.post("/api/ranges", &range).await?;
+    let id: i64 = client
+        .post("/api/ranges", &range)
+        .await
+        .map_err(|e| match e.downcast::<AlreadyExistsError>() {
+            Ok(_) => anyhow::anyhow!(
+                "Dynamic range {}-{} already exists",
+                start_ip, end_ip
+            ),
+            Err(e) => e,
+        })?;
     println!("Created dynamic range with ID: {}", id);
 
     Ok(())

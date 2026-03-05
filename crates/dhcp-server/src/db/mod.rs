@@ -9,6 +9,20 @@ pub(crate) mod tests;
 pub use memory::InMemoryDatabase;
 pub use sqlite::SqliteDatabase;
 
+/// Returns true if the error is a database unique constraint violation.
+pub fn is_unique_violation(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>()
+        .and_then(|e| {
+            if let sqlx::Error::Database(db_err) = e {
+                Some(db_err)
+            } else {
+                None
+            }
+        })
+        .map(|db_err| db_err.is_unique_violation())
+        .unwrap_or(false)
+}
+
 /// Database trait - defines the interface for all database implementations
 #[async_trait::async_trait]
 pub trait Database: Send + Sync {

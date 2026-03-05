@@ -5,6 +5,18 @@ use hyper_util::client::legacy::Client;
 use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 use serde::{Deserialize, Serialize};
 
+/// Error returned when the server responds with 409 Conflict.
+#[derive(Debug)]
+pub struct AlreadyExistsError;
+
+impl std::fmt::Display for AlreadyExistsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "resource already exists")
+    }
+}
+
+impl std::error::Error for AlreadyExistsError {}
+
 pub enum ApiClient {
     Unix {
         client: Client<UnixConnector, Full<Bytes>>,
@@ -84,6 +96,9 @@ impl ApiClient {
 
         let status = response.status();
         let body = response.into_body().collect().await?.to_bytes();
+        if status == StatusCode::CONFLICT {
+            return Err(AlreadyExistsError.into());
+        }
         if !status.is_success() {
             let body_str = String::from_utf8_lossy(&body);
             anyhow::bail!("Request failed with status {}: {}", status, body_str);

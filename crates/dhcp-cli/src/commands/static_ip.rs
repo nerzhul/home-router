@@ -1,4 +1,4 @@
-use crate::client::ApiClient;
+use crate::client::{AlreadyExistsError, ApiClient};
 use crate::StaticCommands;
 use anyhow::Result;
 use dhcp_server::models::StaticIP;
@@ -69,7 +69,16 @@ async fn create(
         enabled: true,
     };
 
-    let id: i64 = client.post("/api/static-ips", &static_ip).await?;
+    let id: i64 = client
+        .post("/api/static-ips", &static_ip)
+        .await
+        .map_err(|e| match e.downcast::<AlreadyExistsError>() {
+            Ok(_) => anyhow::anyhow!(
+                "Static IP already exists (MAC {} or IP {} already assigned)",
+                static_ip.mac_address, static_ip.ip_address
+            ),
+            Err(e) => e,
+        })?;
     println!("Created static IP with ID: {}", id);
 
     Ok(())

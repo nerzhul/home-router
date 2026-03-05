@@ -1,4 +1,4 @@
-use crate::client::ApiClient;
+use crate::client::{AlreadyExistsError, ApiClient};
 use crate::SubnetCommands;
 use anyhow::Result;
 use dhcp_server::models::Subnet;
@@ -81,7 +81,13 @@ async fn create(
         enabled: true,
     };
 
-    let id: i64 = client.post("/api/subnets", &subnet).await?;
+    let id: i64 = client
+        .post("/api/subnets", &subnet)
+        .await
+        .map_err(|e| match e.downcast::<AlreadyExistsError>() {
+            Ok(_) => anyhow::anyhow!("Subnet {}/{} already exists", network_ip, netmask),
+            Err(e) => e,
+        })?;
     println!("Created subnet with ID: {}", id);
 
     Ok(())
