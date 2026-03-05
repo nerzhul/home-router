@@ -135,7 +135,31 @@ async fn main() -> Result<()> {
                             let stream = hyper_util::rt::TokioIo::new(stream);
                             let hyper_service = hyper::service::service_fn(
                                 move |request: hyper::Request<hyper::body::Incoming>| {
-                                    app.clone().oneshot(request)
+                                    let method = request.method().clone();
+                                    let uri = request.uri().clone();
+                                    let app = app.clone();
+
+                                    async move {
+                                        let response = app.oneshot(request).await;
+                                        match &response {
+                                            Ok(resp) => {
+                                                let status = resp.status();
+                                                info!(
+                                                    "Unix socket request: {} {} -> {}",
+                                                    method,
+                                                    uri,
+                                                    status.as_u16()
+                                                );
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "Unix socket request error: {} {} -> {}",
+                                                    method, uri, e
+                                                );
+                                            }
+                                        }
+                                        response
+                                    }
                                 },
                             );
 

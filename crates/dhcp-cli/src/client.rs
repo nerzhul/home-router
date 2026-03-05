@@ -130,4 +130,25 @@ impl ApiClient {
 
         Ok(())
     }
+
+    pub async fn health(&self) -> Result<String> {
+        let uri = self.build_uri("/health");
+        let req = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Full::default())?;
+
+        let response = match self {
+            Self::Unix { client, .. } => client.request(req).await?,
+            Self::Http { client, .. } => client.request(req).await?,
+        };
+
+        if response.status() != StatusCode::OK {
+            anyhow::bail!("Health check failed with status: {}", response.status());
+        }
+
+        let body = response.into_body().collect().await?.to_bytes();
+        let data = String::from_utf8_lossy(&body).to_string();
+        Ok(data)
+    }
 }

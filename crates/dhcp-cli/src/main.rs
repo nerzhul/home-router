@@ -1,8 +1,8 @@
-mod commands;
 mod client;
+mod commands;
 
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "dhcp-cli")]
@@ -11,7 +11,7 @@ struct Cli {
     /// API server URL (http://...) or Unix socket path (default: /var/run/dhcp-server.sock)
     #[arg(long, short = 'u')]
     api_url: Option<String>,
-    
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -35,6 +35,8 @@ enum Commands {
     },
     /// View leases
     Leases,
+    /// Check API health
+    Health,
 }
 
 #[derive(Subcommand)]
@@ -131,21 +133,19 @@ enum StaticCommands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     // Determine client type based on api_url
     let client = match &cli.api_url {
         Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
             client::ApiClient::new_http(url)
         }
-        Some(path) => {
-            client::ApiClient::new_unix(path)
-        }
+        Some(path) => client::ApiClient::new_unix(path),
         None => {
             // Default to Unix socket
             client::ApiClient::new_unix("/var/run/dhcp-server.sock")
         }
     };
-    
+
     match cli.command {
         Commands::Subnet { action } => {
             commands::subnet::handle(client, action).await?;
@@ -159,7 +159,11 @@ async fn main() -> Result<()> {
         Commands::Leases => {
             commands::lease::list(client).await?;
         }
+        Commands::Health => {
+            let result = client.health().await?;
+            println!("{}", result);
+        }
     }
-    
+
     Ok(())
 }

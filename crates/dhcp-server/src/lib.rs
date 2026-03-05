@@ -16,6 +16,7 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
+use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -161,6 +162,7 @@ pub fn create_router_with_auth(
         .merge(protected_routes)
         // Health check - always public
         .route("/health", get(handlers::health::health_check))
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     // Merge with Swagger UI
