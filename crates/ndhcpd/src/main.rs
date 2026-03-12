@@ -52,25 +52,25 @@ async fn main() -> Result<()> {
     // ── 2. Load configuration (before tracing so syslog opt is known) ────────
     let mut config = Config::from_file(&config_path).unwrap_or_else(|_| Config::default());
 
-    // ── 3. Initialize tracing (stdout + optional syslog) ─────────────────────
+    // ── 3. Initialize tracing (syslog if enabled, otherwise stdout) ──────────
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "ndhcpd=debug".into());
 
-    let syslog_layer = if config.logging.syslog {
+    let (stdout_layer, syslog_layer) = if config.logging.syslog {
         match SyslogLayer::new() {
-            Ok(layer) => Some(layer),
+            Ok(layer) => (None, Some(layer)),
             Err(e) => {
-                eprintln!("Warning: failed to connect to syslog: {e}");
-                None
+                eprintln!("Warning: failed to connect to syslog: {e}, falling back to stdout");
+                (Some(tracing_subscriber::fmt::layer()), None)
             }
         }
     } else {
-        None
+        (Some(tracing_subscriber::fmt::layer()), None)
     };
 
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(stdout_layer)
         .with(syslog_layer)
         .init();
 
