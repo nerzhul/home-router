@@ -4,7 +4,7 @@ pub mod db;
 pub mod dhcp;
 pub mod handlers;
 pub mod models;
-pub mod routes;
+pub mod utils;
 
 pub use config::{Config, RaConfig};
 pub use db::{create_database, Database, DynDatabase, InMemoryDatabase, SqliteDatabase};

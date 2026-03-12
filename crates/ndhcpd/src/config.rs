@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Send logs to syslog in addition to stdout
+    #[serde(default)]
+    pub syslog: bool,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self { syslog: false }
+    }
+}
+
 /// Configuration structure loaded from YAML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -19,6 +33,10 @@ pub struct Config {
     /// Router Advertisement (IPv6) configuration
     #[serde(default)]
     pub ra: Option<RaConfig>,
+
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 fn default_db_path() -> String {
@@ -148,6 +166,7 @@ impl Default for Config {
                 max_lease_time: default_max_lease_time(),
             },
             ra: None,
+            logging: LoggingConfig::default(),
         }
     }
 }

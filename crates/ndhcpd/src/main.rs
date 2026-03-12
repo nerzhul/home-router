@@ -1,11 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
 use ndhcpd::{
-    config::RaConfig, create_database, create_router_with_auth, dhcp::DhcpServer, Config,
+    config::RaConfig, create_database, create_router_with_auth, dhcp::DhcpServer,
+    utils::logging::SyslogLayer, Config,
 };
 use std::sync::Arc;
 use tower::ServiceExt;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg(target_os = "freebsd")]
@@ -34,28 +35,12 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "ndhcpd=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
-    info!("Starting DHCP Server");
-
-    // Load configuration - try specified path, then current directory
+    // ── 1. Resolve config path (before tracing is ready) ─────────────────────
     let config_path = if std::path::Path::new(&args.config).exists() {
         args.config.clone()
     } else if args.config == DEFAULT_CONFIG_PATH {
-        // If default path doesn't exist, try current directory
         let current_dir_config = "config.yaml";
         if std::path::Path::new(current_dir_config).exists() {
-            info!(
-                "Config not found at {}, using {}",
-                args.config, current_dir_config
-            );
             current_dir_config.to_string()
         } else {
             args.config.clone()
@@ -64,15 +49,45 @@ async fn main() -> Result<()> {
         args.config.clone()
     };
 
-    let mut config = match Config::from_file(&config_path) {
+    // ── 2. Load configuration (before tracing so syslog opt is known) ────────
+    let mut config = Config::from_file(&config_path).unwrap_or_else(|_| Config::default());
+
+    // ── 3. Initialize tracing (stdout + optional syslog) ─────────────────────
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "ndhcpd=debug".into());
+
+    let syslog_layer = if config.logging.syslog {
+        match SyslogLayer::new() {
+            Ok(layer) => Some(layer),
+            Err(e) => {
+                eprintln!("Warning: failed to connect to syslog: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(syslog_layer)
+        .init();
+
+    // ── 4. Post-init startup log ──────────────────────────────────────────────
+    info!("Starting DHCP Server");
+
+    if config_path != args.config {
+        info!("Config not found at {}, using {}", args.config, config_path);
+    }
+    match Config::from_file(&config_path) {
         Ok(cfg) => {
             info!("Loaded configuration from {}", config_path);
-            cfg
+            config = cfg;
         }
         Err(e) => {
             error!("Failed to load configuration from {}: {}", config_path, e);
-            info!("Using default configuration");
-            Config::default()
+            warn!("Using default configuration");
         }
     };
 

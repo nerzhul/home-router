@@ -17,6 +17,11 @@ api:
   # Note: Unix socket connections are always exempt from authentication
   require_authentication: false
 
+# Logging configuration
+logging:
+  # Send logs to syslog (LOG_DAEMON facility) in addition to stdout (default: false)
+  syslog: false
+
 # DHCP Server configuration
 dhcp:
   # Default lease time in seconds (24 hours)
