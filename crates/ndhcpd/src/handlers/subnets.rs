@@ -1,4 +1,4 @@
-use crate::{db::is_unique_violation, models::Subnet, AppState};
+use crate::{db::is_unique_violation, models::Subnet, utils::network::subnets_overlap, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -40,6 +40,23 @@ pub async fn create_subnet(
     State(state): State<AppState>,
     Json(subnet): Json<Subnet>,
 ) -> Result<(StatusCode, Json<i64>), StatusCode> {
+    // Check for overlap with existing subnets
+    let existing = state.db.list_subnets().await.map_err(|e| {
+        error!("Failed to list subnets for overlap check: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    for existing_subnet in &existing {
+        if subnets_overlap(
+            subnet.network,
+            subnet.netmask,
+            existing_subnet.network,
+            existing_subnet.netmask,
+        ) {
+            return Err(StatusCode::CONFLICT);
+        }
+    }
+
     state
         .db
         .create_subnet(&subnet)
@@ -145,3 +162,5 @@ pub async fn delete_subnet(
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
+
+

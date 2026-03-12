@@ -1,7 +1,7 @@
 #[cfg(test)]
 use super::*;
 #[cfg(test)]
-use crate::config::{ApiConfig, Config, DhcpConfig};
+use crate::config::{ApiConfig, Config, DhcpConfig, LoggingConfig};
 #[cfg(test)]
 use crate::models::Subnet;
 #[cfg(test)]
@@ -25,6 +25,7 @@ pub fn create_test_config() -> Config {
             max_lease_time: 604800,
         },
         ra: None,
+        logging: LoggingConfig::default(),
     }
 }
 
