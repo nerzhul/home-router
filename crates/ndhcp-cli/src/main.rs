@@ -128,6 +128,14 @@ enum StaticCommands {
         /// Static IP address
         ip: String,
     },
+    /// Update the hostname of a static IP assignment
+    SetHostname {
+        /// Static IP address
+        ip: String,
+        /// Hostname (omit to clear)
+        #[arg(long)]
+        hostname: Option<String>,
+    },
 }
 
 #[tokio::main]

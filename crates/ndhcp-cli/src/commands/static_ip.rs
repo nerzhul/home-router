@@ -14,6 +14,7 @@ pub async fn handle(client: ApiClient, action: StaticCommands) -> Result<()> {
             hostname,
         } => create(client, subnet_id, mac, ip, hostname).await,
         StaticCommands::Delete { ip } => delete(client, ip).await,
+        StaticCommands::SetHostname { ip, hostname } => set_hostname(client, ip, hostname).await,
     }
 }
 
@@ -30,19 +31,18 @@ async fn list(client: ApiClient, subnet_id: Option<i64>) -> Result<()> {
         println!("No static IPs configured");
     } else {
         println!(
-            "{:<12} {:<20} {:<18} {:<20} {:<8}",
-            "Subnet ID", "MAC Address", "IP Address", "Hostname", "Enabled"
+            "{:<18} {:<20} {:<12} {:<20}",
+            "IP Address", "MAC Address", "Subnet ID", "Hostname"
         );
-        println!("{}", "-".repeat(83));
+        println!("{}", "-".repeat(74));
 
         for static_ip in static_ips {
             println!(
-                "{:<12} {:<20} {:<18} {:<20} {:<8}",
-                static_ip.subnet_id,
-                static_ip.mac_address,
+                "{:<18} {:<20} {:<12} {:<20}",
                 static_ip.ip_address,
+                static_ip.mac_address,
+                static_ip.subnet_id,
                 static_ip.hostname.as_deref().unwrap_or("-"),
-                static_ip.enabled
             );
         }
     }
@@ -64,7 +64,6 @@ async fn create(
         mac_address: mac,
         ip_address: ip_addr,
         hostname,
-        enabled: true,
     };
 
     client
@@ -86,5 +85,17 @@ async fn create(
 async fn delete(client: ApiClient, ip: String) -> Result<()> {
     client.delete(&format!("/api/static-ips/{}", ip)).await?;
     println!("Deleted static IP {}", ip);
+    Ok(())
+}
+
+async fn set_hostname(client: ApiClient, ip: String, hostname: Option<String>) -> Result<()> {
+    use serde_json::json;
+    client
+        .patch::<_, ()>(&format!("/api/static-ips/{}/hostname", ip), &json!({ "hostname": &hostname }))
+        .await?;
+    match hostname {
+        Some(h) => println!("Updated hostname for {} to '{}'", ip, h),
+        None => println!("Cleared hostname for {}", ip),
+    }
     Ok(())
 }

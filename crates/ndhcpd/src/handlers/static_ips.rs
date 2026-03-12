@@ -104,3 +104,40 @@ pub async fn delete_static_ip(
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateHostnameRequest {
+    /// New hostname value (null to clear)
+    pub hostname: Option<String>,
+}
+
+/// Update the hostname of a static IP assignment
+#[utoipa::path(
+    patch,
+    path = "/api/static-ips/{ip}/hostname",
+    tag = "static-ips",
+    request_body = UpdateHostnameRequest,
+    params(
+        ("ip" = String, Path, description = "Static IP address")
+    ),
+    responses(
+        (status = 204, description = "Hostname updated"),
+        (status = 404, description = "Static IP not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn update_static_ip_hostname(
+    State(state): State<AppState>,
+    Path(ip): Path<String>,
+    Json(body): Json<UpdateHostnameRequest>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .db
+        .update_static_ip_hostname(&ip, body.hostname)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|e| {
+            error!("Failed to update hostname for static IP ip={}: {}", ip, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}

@@ -145,8 +145,16 @@ impl Database for InMemoryDatabase {
         let static_ips = self.static_ips.read().await;
         Ok(static_ips
             .iter()
-            .find(|s| s.mac_address == mac && s.enabled)
+            .find(|s| s.mac_address == mac)
             .cloned())
+    }
+
+    async fn update_static_ip_hostname(&self, ip_address: &str, hostname: Option<String>) -> anyhow::Result<()> {
+        let mut static_ips = self.static_ips.write().await;
+        if let Some(entry) = static_ips.iter_mut().find(|s| s.ip_address.to_string() == ip_address) {
+            entry.hostname = hostname;
+        }
+        Ok(())
     }
 
     async fn delete_static_ip(&self, ip_address: &str) -> anyhow::Result<()> {

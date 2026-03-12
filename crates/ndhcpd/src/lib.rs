@@ -34,6 +34,7 @@ use utoipa_swagger_ui::SwaggerUi;
         handlers::static_ips::list_static_ips,
         handlers::static_ips::create_static_ip,
         handlers::static_ips::delete_static_ip,
+        handlers::static_ips::update_static_ip_hostname,
         handlers::leases::list_leases,
         handlers::tokens::list_tokens,
         handlers::tokens::create_token,
@@ -55,6 +56,7 @@ use utoipa_swagger_ui::SwaggerUi;
             models::CreateTokenRequest,
             models::CreateTokenResponse,
             models::IAPrefix,
+            handlers::static_ips::UpdateHostnameRequest,
         )
     ),
     tags(
@@ -115,6 +117,10 @@ pub fn create_router_with_auth(
         .route(
             "/api/static-ips/:ip",
             delete(handlers::static_ips::delete_static_ip),
+        )
+        .route(
+            "/api/static-ips/:ip/hostname",
+            patch(handlers::static_ips::update_static_ip_hostname),
         )
         // Lease routes
         .route("/api/leases", get(handlers::leases::list_leases))

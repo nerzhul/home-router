@@ -70,10 +70,6 @@ pub struct StaticIP {
 
     /// Optional hostname
     pub hostname: Option<String>,
-
-    /// Whether this assignment is enabled
-    #[serde(default = "default_true")]
-    pub enabled: bool,
 }
 
 /// A DHCP lease

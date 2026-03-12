@@ -35,7 +35,6 @@ pub(crate) mod suite {
             mac_address: format!("aa:bb:cc:dd:ee:{mac_suffix}"),
             ip_address: Ipv4Addr::new(10, 0, third_octet, 50),
             hostname: Some("test-host".to_string()),
-            enabled: true,
         }
     }
 

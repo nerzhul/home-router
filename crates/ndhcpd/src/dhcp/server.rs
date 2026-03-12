@@ -778,12 +778,10 @@ mod tests {
 
         // Create static IP assignment
         let static_ip = StaticIP {
-            id: None,
             subnet_id,
             mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
             ip_address: Ipv4Addr::new(192, 168, 1, 50),
             hostname: Some("test-host".to_string()),
-            enabled: true,
         };
         db.create_static_ip(&static_ip).await.unwrap();
 
@@ -878,12 +876,10 @@ mod tests {
 
         // Create static IP assignment
         let static_ip = StaticIP {
-            id: None,
             subnet_id,
             mac_address: "AA:BB:CC:DD:EE:00".to_string(),
             ip_address: Ipv4Addr::new(192, 168, 1, 50),
             hostname: Some("static-host".to_string()),
-            enabled: true,
         };
         db.create_static_ip(&static_ip).await.unwrap();
 
@@ -1071,12 +1067,10 @@ mod tests {
 
         // Create static IP assignment
         let static_ip = StaticIP {
-            id: None,
             subnet_id,
             mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
             ip_address: Ipv4Addr::new(192, 168, 1, 50),
             hostname: Some("test-host".to_string()),
-            enabled: true,
         };
         db.create_static_ip(&static_ip).await.unwrap();
 
@@ -1110,12 +1104,10 @@ mod tests {
 
         // Create static IP assignment
         let static_ip = StaticIP {
-            id: None,
             subnet_id,
             mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
             ip_address: Ipv4Addr::new(192, 168, 1, 50),
             hostname: Some("test-host".to_string()),
-            enabled: true,
         };
         db.create_static_ip(&static_ip).await.unwrap();
 

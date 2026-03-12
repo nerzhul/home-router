@@ -139,6 +139,40 @@ impl ApiClient {
         Ok(())
     }
 
+    pub async fn patch<T: Serialize, R: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
+        let uri = self.build_uri(path);
+        let body_bytes = serde_json::to_vec(body)?;
+
+        let req = Request::builder()
+            .method("PATCH")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Full::new(Bytes::from(body_bytes)))?;
+
+        let response = match self {
+            Self::Unix { client, .. } => client.request(req).await?,
+            Self::Http { client, .. } => client.request(req).await?,
+        };
+
+        let status = response.status();
+        let body = response.into_body().collect().await?.to_bytes();
+        if !status.is_success() {
+            let body_str = String::from_utf8_lossy(&body);
+            anyhow::bail!("Request failed with status {}: {}", status, body_str);
+        }
+
+        let data = if body.is_empty() {
+            serde_json::from_slice(b"null")?
+        } else {
+            serde_json::from_slice(&body)?
+        };
+        Ok(data)
+    }
+
     pub async fn delete(&self, path: &str) -> Result<()> {
         let uri = self.build_uri(path);
         let req = Request::builder()
