@@ -185,32 +185,32 @@ impl Database for SqliteDatabase {
     }
 
     // Static IP operations
-    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<i64> {
-        let result = sqlx::query(
-            "INSERT INTO static_ips (subnet_id, mac_address, ip_address, hostname, enabled) VALUES (?, ?, ?, ?, ?)"
+    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO static_ips (ip_address, subnet_id, mac_address, hostname, enabled) VALUES (?, ?, ?, ?, ?)"
         )
+        .bind(static_ip.ip_address.to_string())
         .bind(static_ip.subnet_id)
         .bind(&static_ip.mac_address)
-        .bind(static_ip.ip_address.to_string())
         .bind(&static_ip.hostname)
         .bind(static_ip.enabled as i64)
         .execute(&self.pool)
         .await?;
 
-        Ok(result.last_insert_rowid())
+        Ok(())
     }
 
     async fn list_static_ips(&self, subnet_id: Option<i64>) -> anyhow::Result<Vec<StaticIP>> {
         let rows = if let Some(subnet_id) = subnet_id {
             sqlx::query(
-                "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips WHERE subnet_id = ?"
+                "SELECT subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips WHERE subnet_id = ?"
             )
             .bind(subnet_id)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query(
-                "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips",
+                "SELECT subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips",
             )
             .fetch_all(&self.pool)
             .await?
@@ -219,7 +219,6 @@ impl Database for SqliteDatabase {
         Ok(rows
             .into_iter()
             .map(|r| StaticIP {
-                id: r.get("id"),
                 subnet_id: r.get("subnet_id"),
                 mac_address: r.get("mac_address"),
                 ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
@@ -231,14 +230,13 @@ impl Database for SqliteDatabase {
 
     async fn get_static_ip_by_mac(&self, mac: &str) -> anyhow::Result<Option<StaticIP>> {
         let row = sqlx::query(
-            "SELECT id, subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips WHERE mac_address = ? AND enabled = 1"
+            "SELECT subnet_id, mac_address, ip_address, hostname, enabled FROM static_ips WHERE mac_address = ? AND enabled = 1"
         )
         .bind(mac)
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row.map(|r| StaticIP {
-            id: r.get("id"),
             subnet_id: r.get("subnet_id"),
             mac_address: r.get("mac_address"),
             ip_address: r.get::<String, _>("ip_address").parse().unwrap(),
@@ -247,9 +245,9 @@ impl Database for SqliteDatabase {
         }))
     }
 
-    async fn delete_static_ip(&self, id: i64) -> anyhow::Result<()> {
-        sqlx::query("DELETE FROM static_ips WHERE id = ?")
-            .bind(id)
+    async fn delete_static_ip(&self, ip_address: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM static_ips WHERE ip_address = ?")
+            .bind(ip_address)
             .execute(&self.pool)
             .await?;
         Ok(())

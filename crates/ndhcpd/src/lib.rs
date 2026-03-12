@@ -113,7 +113,7 @@ pub fn create_router_with_auth(
             post(handlers::static_ips::create_static_ip),
         )
         .route(
-            "/api/static-ips/:id",
+            "/api/static-ips/:ip",
             delete(handlers::static_ips::delete_static_ip),
         )
         // Lease routes

@@ -31,7 +31,6 @@ pub(crate) mod suite {
 
     fn static_ip(subnet_id: i64, mac_suffix: &str, third_octet: u8) -> StaticIP {
         StaticIP {
-            id: None,
             subnet_id,
             mac_address: format!("aa:bb:cc:dd:ee:{mac_suffix}"),
             ip_address: Ipv4Addr::new(10, 0, third_octet, 50),
@@ -166,11 +165,9 @@ pub(crate) mod suite {
 
     pub async fn test_create_and_list_static_ip(db: &dyn Database) {
         let sid = db.create_subnet(&subnet(20)).await.unwrap();
-        let id = db
-            .create_static_ip(&static_ip(sid, "01", 20))
+        db.create_static_ip(&static_ip(sid, "01", 20))
             .await
             .unwrap();
-        assert!(id > 0);
 
         let ips = db.list_static_ips(Some(sid)).await.unwrap();
         assert_eq!(ips.len(), 1);
@@ -199,15 +196,14 @@ pub(crate) mod suite {
 
     pub async fn test_delete_static_ip(db: &dyn Database) {
         let sid = db.create_subnet(&subnet(22)).await.unwrap();
-        let id = db
-            .create_static_ip(&static_ip(sid, "03", 22))
-            .await
-            .unwrap();
+        let sip = static_ip(sid, "03", 22);
+        let ip_str = sip.ip_address.to_string();
+        db.create_static_ip(&sip).await.unwrap();
 
-        db.delete_static_ip(id).await.unwrap();
+        db.delete_static_ip(&ip_str).await.unwrap();
 
         let ips = db.list_static_ips(Some(sid)).await.unwrap();
-        assert!(ips.iter().all(|s| s.id != Some(id)));
+        assert!(ips.iter().all(|s| s.ip_address.to_string() != ip_str));
     }
 
     // --- Lease tests ---

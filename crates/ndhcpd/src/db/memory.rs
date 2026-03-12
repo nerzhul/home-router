@@ -14,7 +14,6 @@ pub struct InMemoryDatabase {
     tokens: Arc<RwLock<Vec<(i64, String, String, i64)>>>, // id, name, token_hash, enabled
     next_subnet_id: Arc<RwLock<i64>>,
     next_range_id: Arc<RwLock<i64>>,
-    next_static_ip_id: Arc<RwLock<i64>>,
     next_lease_id: Arc<RwLock<i64>>,
     next_ia_prefix_id: Arc<RwLock<i64>>,
     next_token_id: Arc<RwLock<i64>>,
@@ -32,7 +31,6 @@ impl InMemoryDatabase {
             tokens: Arc::new(RwLock::new(Vec::new())),
             next_subnet_id: Arc::new(RwLock::new(1)),
             next_range_id: Arc::new(RwLock::new(1)),
-            next_static_ip_id: Arc::new(RwLock::new(1)),
             next_lease_id: Arc::new(RwLock::new(1)),
             next_ia_prefix_id: Arc::new(RwLock::new(1)),
             next_token_id: Arc::new(RwLock::new(1)),
@@ -125,17 +123,10 @@ impl Database for InMemoryDatabase {
     }
 
     // Static IP operations
-    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<i64> {
-        let mut id = self.next_static_ip_id.write().await;
-        let new_id = *id;
-        *id += 1;
-
+    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<()> {
         let mut static_ips = self.static_ips.write().await;
-        let mut new_static_ip = static_ip.clone();
-        new_static_ip.id = Some(new_id);
-        static_ips.push(new_static_ip);
-
-        Ok(new_id)
+        static_ips.push(static_ip.clone());
+        Ok(())
     }
 
     async fn list_static_ips(&self, subnet_id: Option<i64>) -> anyhow::Result<Vec<StaticIP>> {
@@ -158,9 +149,9 @@ impl Database for InMemoryDatabase {
             .cloned())
     }
 
-    async fn delete_static_ip(&self, id: i64) -> anyhow::Result<()> {
+    async fn delete_static_ip(&self, ip_address: &str) -> anyhow::Result<()> {
         let mut static_ips = self.static_ips.write().await;
-        static_ips.retain(|s| s.id != Some(id));
+        static_ips.retain(|s| s.ip_address.to_string() != ip_address);
         Ok(())
     }
 

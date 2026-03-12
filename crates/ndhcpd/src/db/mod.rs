@@ -40,10 +40,10 @@ pub trait Database: Send + Sync {
     async fn delete_range(&self, id: i64) -> anyhow::Result<()>;
 
     // Static IP operations
-    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<i64>;
+    async fn create_static_ip(&self, static_ip: &StaticIP) -> anyhow::Result<()>;
     async fn list_static_ips(&self, subnet_id: Option<i64>) -> anyhow::Result<Vec<StaticIP>>;
     async fn get_static_ip_by_mac(&self, mac: &str) -> anyhow::Result<Option<StaticIP>>;
-    async fn delete_static_ip(&self, id: i64) -> anyhow::Result<()>;
+    async fn delete_static_ip(&self, ip_address: &str) -> anyhow::Result<()>;
 
     // Lease operations
     async fn create_lease(&self, lease: &Lease) -> anyhow::Result<i64>;

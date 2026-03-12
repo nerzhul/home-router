@@ -50,7 +50,7 @@ pub async fn list_static_ips(
     tag = "static-ips",
     request_body = StaticIP,
     responses(
-        (status = 201, description = "Static IP created", body = i64),
+        (status = 201, description = "Static IP created"),
         (status = 400, description = "Bad request"),
         (status = 409, description = "Static IP already exists (duplicate MAC or IP)"),
         (status = 500, description = "Internal server error")
@@ -59,12 +59,12 @@ pub async fn list_static_ips(
 pub async fn create_static_ip(
     State(state): State<AppState>,
     Json(static_ip): Json<StaticIP>,
-) -> Result<(StatusCode, Json<i64>), StatusCode> {
+) -> Result<StatusCode, StatusCode> {
     state
         .db
         .create_static_ip(&static_ip)
         .await
-        .map(|id| (StatusCode::CREATED, Json(id)))
+        .map(|_| StatusCode::CREATED)
         .map_err(|e| {
             if is_unique_violation(&e) {
                 return StatusCode::CONFLICT;
@@ -80,10 +80,10 @@ pub async fn create_static_ip(
 /// Delete a static IP assignment
 #[utoipa::path(
     delete,
-    path = "/api/static-ips/{id}",
+    path = "/api/static-ips/{ip}",
     tag = "static-ips",
     params(
-        ("id" = i64, Path, description = "Static IP ID")
+        ("ip" = String, Path, description = "Static IP address")
     ),
     responses(
         (status = 204, description = "Static IP deleted"),
@@ -92,15 +92,15 @@ pub async fn create_static_ip(
 )]
 pub async fn delete_static_ip(
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(ip): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     state
         .db
-        .delete_static_ip(id)
+        .delete_static_ip(&ip)
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|e| {
-            error!("Failed to delete static IP id={}: {}", id, e);
+            error!("Failed to delete static IP ip={}: {}", ip, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }

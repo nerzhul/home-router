@@ -125,8 +125,8 @@ enum StaticCommands {
     },
     /// Delete a static IP assignment
     Delete {
-        /// Static IP ID
-        id: i64,
+        /// Static IP address
+        ip: String,
     },
 }
 

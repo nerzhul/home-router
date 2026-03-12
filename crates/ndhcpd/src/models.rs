@@ -58,8 +58,6 @@ pub struct DynamicRange {
 /// A static IP assignment
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StaticIP {
-    pub id: Option<i64>,
-
     /// Foreign key to subnet
     pub subnet_id: i64,
 

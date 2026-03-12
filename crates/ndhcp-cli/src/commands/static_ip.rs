@@ -13,7 +13,7 @@ pub async fn handle(client: ApiClient, action: StaticCommands) -> Result<()> {
             ip,
             hostname,
         } => create(client, subnet_id, mac, ip, hostname).await,
-        StaticCommands::Delete { id } => delete(client, id).await,
+        StaticCommands::Delete { ip } => delete(client, ip).await,
     }
 }
 
@@ -30,15 +30,14 @@ async fn list(client: ApiClient, subnet_id: Option<i64>) -> Result<()> {
         println!("No static IPs configured");
     } else {
         println!(
-            "{:<5} {:<12} {:<20} {:<18} {:<20} {:<8}",
-            "ID", "Subnet ID", "MAC Address", "IP Address", "Hostname", "Enabled"
+            "{:<12} {:<20} {:<18} {:<20} {:<8}",
+            "Subnet ID", "MAC Address", "IP Address", "Hostname", "Enabled"
         );
-        println!("{}", "-".repeat(90));
+        println!("{}", "-".repeat(83));
 
         for static_ip in static_ips {
             println!(
-                "{:<5} {:<12} {:<20} {:<18} {:<20} {:<8}",
-                static_ip.id.unwrap_or(0),
+                "{:<12} {:<20} {:<18} {:<20} {:<8}",
                 static_ip.subnet_id,
                 static_ip.mac_address,
                 static_ip.ip_address,
@@ -61,7 +60,6 @@ async fn create(
     let ip_addr: Ipv4Addr = ip.parse()?;
 
     let static_ip = StaticIP {
-        id: None,
         subnet_id,
         mac_address: mac,
         ip_address: ip_addr,
@@ -69,8 +67,8 @@ async fn create(
         enabled: true,
     };
 
-    let id: i64 = client
-        .post("/api/static-ips", &static_ip)
+    client
+        .post::<_, ()>("/api/static-ips", &static_ip)
         .await
         .map_err(|e| match e.downcast::<AlreadyExistsError>() {
             Ok(_) => anyhow::anyhow!(
@@ -80,13 +78,13 @@ async fn create(
             ),
             Err(e) => e,
         })?;
-    println!("Created static IP with ID: {}", id);
+    println!("Created static IP {}", static_ip.ip_address);
 
     Ok(())
 }
 
-async fn delete(client: ApiClient, id: i64) -> Result<()> {
-    client.delete(&format!("/api/static-ips/{}", id)).await?;
-    println!("Deleted static IP {}", id);
+async fn delete(client: ApiClient, ip: String) -> Result<()> {
+    client.delete(&format!("/api/static-ips/{}", ip)).await?;
+    println!("Deleted static IP {}", ip);
     Ok(())
 }

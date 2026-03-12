@@ -104,7 +104,11 @@ impl ApiClient {
             anyhow::bail!("Request failed with status {}: {}", status, body_str);
         }
 
-        let data = serde_json::from_slice(&body)?;
+        let data = if body.is_empty() {
+            serde_json::from_slice(b"null")?
+        } else {
+            serde_json::from_slice(&body)?
+        };
         Ok(data)
     }
 
