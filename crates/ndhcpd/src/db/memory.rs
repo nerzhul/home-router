@@ -142,10 +142,11 @@ impl Database for InMemoryDatabase {
     }
 
     async fn get_static_ip_by_mac(&self, mac: &str) -> anyhow::Result<Option<StaticIP>> {
+        let mac_lower = mac.to_lowercase();
         let static_ips = self.static_ips.read().await;
         Ok(static_ips
             .iter()
-            .find(|s| s.mac_address == mac)
+            .find(|s| s.mac_address.to_lowercase() == mac_lower)
             .cloned())
     }
 
@@ -178,11 +179,12 @@ impl Database for InMemoryDatabase {
     }
 
     async fn get_active_lease(&self, mac: &str) -> anyhow::Result<Option<Lease>> {
+        let mac_lower = mac.to_lowercase();
         let now = chrono::Utc::now().timestamp();
         let leases = self.leases.read().await;
         Ok(leases
             .iter()
-            .find(|l| l.mac_address == mac && l.lease_end > now)
+            .find(|l| l.mac_address.to_lowercase() == mac_lower && l.lease_end > now)
             .cloned())
     }
 

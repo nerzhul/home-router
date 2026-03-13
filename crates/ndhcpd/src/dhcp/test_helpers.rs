@@ -23,6 +23,7 @@ pub fn create_test_config() -> Config {
         dhcp: DhcpConfig {
             default_lease_time: 86400,
             max_lease_time: 604800,
+            lease_cleanup_interval_minutes: 60,
         },
         ra: None,
         logging: LoggingConfig::default(),

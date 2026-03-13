@@ -228,7 +228,7 @@ impl Database for SqliteDatabase {
 
     async fn get_static_ip_by_mac(&self, mac: &str) -> anyhow::Result<Option<StaticIP>> {
         let row = sqlx::query(
-            "SELECT subnet_id, mac_address, ip_address, hostname FROM static_ips WHERE mac_address = ?"
+            "SELECT subnet_id, mac_address, ip_address, hostname FROM static_ips WHERE LOWER(mac_address) = LOWER(?)"
         )
         .bind(mac)
         .fetch_optional(&self.pool)
@@ -279,7 +279,7 @@ impl Database for SqliteDatabase {
     async fn get_active_lease(&self, mac: &str) -> anyhow::Result<Option<Lease>> {
         let now = chrono::Utc::now().timestamp();
         let row = sqlx::query(
-            "SELECT id, subnet_id, mac_address, ip_address, lease_start, lease_end, hostname FROM leases WHERE mac_address = ? AND lease_end > ? ORDER BY lease_end DESC LIMIT 1"
+            "SELECT id, subnet_id, mac_address, ip_address, lease_start, lease_end, hostname FROM leases WHERE LOWER(mac_address) = LOWER(?) AND lease_end > ? ORDER BY lease_end DESC LIMIT 1"
         )
         .bind(mac)
         .bind(now)

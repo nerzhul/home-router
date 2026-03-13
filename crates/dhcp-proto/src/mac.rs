@@ -24,10 +24,10 @@ impl MacAddress {
         &self.0
     }
 
-    /// Convert to a formatted string (XX:XX:XX:XX:XX:XX)
+    /// Convert to a formatted string (xx:xx:xx:xx:xx:xx)
     pub fn to_string(&self) -> String {
         format!(
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
             self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
         )
     }
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn test_mac_to_string() {
         let mac = MacAddress::new([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
-        assert_eq!(mac.to_string(), "AA:BB:CC:DD:EE:FF");
+        assert_eq!(mac.to_string(), "aa:bb:cc:dd:ee:ff");
     }
 
     #[test]

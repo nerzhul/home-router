@@ -517,7 +517,7 @@ impl DhcpServer {
         config: &Config,
         db: &dyn Database,
     ) -> Option<DhcpPacket> {
-        let mac = packet.chaddr.to_string();
+        let mac = packet.chaddr.to_string().to_lowercase();
 
         // Extract requested IP: from option 50 (new request) or ciaddr (renewal)
         let requested_ip = packet
@@ -593,10 +593,21 @@ impl DhcpServer {
                 if iface_in_subnet(iface_ips, &subnet) {
                     matching_range_and_subnet = Some((r.clone(), subnet));
                     break;
+                } else {
+                    debug!(
+                        "REQUEST from {}: IP {} is in range but subnet {} does not match interface IPs {:?}",
+                        mac, requested_ip, subnet.network, iface_ips
+                    );
                 }
             }
         }
-        let (matching_range, subnet) = matching_range_and_subnet?;
+        let (matching_range, subnet) = matching_range_and_subnet.or_else(|| {
+            warn!(
+                "REQUEST from {}: no enabled range covers {} on this interface (iface_ips={:?})",
+                mac, requested_ip, iface_ips
+            );
+            None
+        })?;
 
         // Verify the IP is not already leased by a different MAC
         let active_leases = match db.list_active_leases().await {
