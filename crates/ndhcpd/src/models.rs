@@ -24,10 +24,6 @@ pub struct Subnet {
 
     /// Domain name
     pub domain_name: Option<String>,
-
-    /// Whether this subnet is enabled
-    #[serde(default = "default_true")]
-    pub enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -192,10 +188,6 @@ pub struct IAPrefix {
 
     /// DNS recursive lookup lifetime in seconds
     pub dns_lifetime: u32,
-
-    /// Whether this prefix is enabled
-    #[serde(default = "default_true")]
-    pub enabled: bool,
 }
 
 impl IAPrefix {
@@ -232,7 +224,6 @@ mod tests {
             valid_lifetime: 2592000,
             dns_servers: vec![Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)],
             dns_lifetime: 86400,
-            enabled: true,
         };
 
         assert_eq!(prefix.dns_servers_to_string(), "2001:db8::1");
@@ -252,7 +243,6 @@ mod tests {
                 Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
             ],
             dns_lifetime: 86400,
-            enabled: true,
         };
 
         assert_eq!(prefix.dns_servers_to_string(), "2001:db8::1,2001:db8::2");
@@ -269,7 +259,6 @@ mod tests {
             valid_lifetime: 2592000,
             dns_servers: vec![],
             dns_lifetime: 86400,
-            enabled: true,
         };
 
         assert_eq!(prefix.dns_servers_to_string(), "");
@@ -331,7 +320,6 @@ mod tests {
                 Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
             ],
             dns_lifetime: 3600,
-            enabled: true,
         };
 
         let json = serde_json::to_string(&prefix).unwrap();
@@ -345,24 +333,6 @@ mod tests {
         assert_eq!(deserialized.valid_lifetime, prefix.valid_lifetime);
         assert_eq!(deserialized.dns_servers, prefix.dns_servers);
         assert_eq!(deserialized.dns_lifetime, prefix.dns_lifetime);
-        assert_eq!(deserialized.enabled, prefix.enabled);
-    }
-
-    #[test]
-    fn test_ia_prefix_default_enabled() {
-        let json = r#"{
-            "interface": "eth0",
-            "prefix": "2001:db8::",
-            "prefix_len": 64,
-            "preferred_lifetime": 86400,
-            "valid_lifetime": 2592000,
-            "dns_servers": [],
-            "dns_lifetime": 86400
-        }"#;
-
-        let prefix: IAPrefix = serde_json::from_str(json).unwrap();
-
-        assert!(prefix.enabled);
     }
 
     #[test]
@@ -374,7 +344,6 @@ mod tests {
             gateway: Ipv4Addr::new(192, 168, 1, 1),
             dns_servers: vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(1, 1, 1, 1)],
             domain_name: Some("local".to_string()),
-            enabled: true,
         };
 
         assert_eq!(subnet.dns_servers_to_string(), "8.8.8.8,1.1.1.1");

@@ -26,10 +26,10 @@ async fn list(client: ApiClient) -> Result<()> {
         println!("No subnets configured");
     } else {
         println!(
-            "{:<5} {:<18} {:<6} {:<15} {:<30} {:<20} {:<8}",
-            "ID", "Network", "Mask", "Gateway", "DNS Servers", "Domain", "Enabled"
+            "{:<5} {:<18} {:<6} {:<15} {:<30} {:<20}",
+            "ID", "Network", "Mask", "Gateway", "DNS Servers", "Domain"
         );
-        println!("{}", "-".repeat(100));
+        println!("{}", "-".repeat(96));
 
         for subnet in subnets {
             let dns = subnet
@@ -40,14 +40,13 @@ async fn list(client: ApiClient) -> Result<()> {
                 .join(",");
 
             println!(
-                "{:<5} {:<18} /{:<5} {:<15} {:<30} {:<20} {:<8}",
+                "{:<5} {:<18} /{:<5} {:<15} {:<30} {:<20}",
                 subnet.id.unwrap_or(0),
                 subnet.network,
                 subnet.netmask,
                 subnet.gateway,
                 dns,
                 subnet.domain_name.as_deref().unwrap_or("-"),
-                subnet.enabled
             );
         }
     }
@@ -78,7 +77,6 @@ async fn create(
         gateway: gateway_ip,
         dns_servers: dns_ips,
         domain_name,
-        enabled: true,
     };
 
     let id: i64 = client
@@ -111,7 +109,6 @@ async fn get(client: ApiClient, id: i64) -> Result<()> {
     if let Some(domain) = &subnet.domain_name {
         println!("Domain: {}", domain);
     }
-    println!("Enabled: {}", subnet.enabled);
 
     Ok(())
 }

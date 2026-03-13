@@ -38,6 +38,13 @@ dhcp:
 # Router Advertisement (IPv6) configuration
 # This section is optional - if not present, default values will be used
 ra:
+  # Enable Router Advertisement (default: false)
+  enabled: false
+
+  # Network interfaces the RA server should listen on
+  ip6_listen_interfaces:
+    - eth0
+
   # Default preferred lifetime in seconds (24 hours)
   default_preferred_lifetime: 86400
   

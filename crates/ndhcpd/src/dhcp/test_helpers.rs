@@ -39,7 +39,6 @@ pub fn create_test_subnet() -> Subnet {
         gateway: Ipv4Addr::new(192, 168, 1, 1),
         dns_servers: vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(8, 8, 4, 4)],
         domain_name: Some("test.local".to_string()),
-        enabled: true,
     }
 }
 

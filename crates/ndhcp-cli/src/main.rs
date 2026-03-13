@@ -33,6 +33,11 @@ enum Commands {
         #[command(subcommand)]
         action: StaticCommands,
     },
+    /// Manage IPv6 subnets (Router Advertisement prefixes)
+    Ip6Subnet {
+        #[command(subcommand)]
+        action: Ip6SubnetCommands,
+    },
     /// View leases
     Leases,
     /// Check API health
@@ -138,6 +143,50 @@ enum StaticCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum Ip6SubnetCommands {
+    /// List all IPv6 subnets (RA prefixes)
+    List {
+        /// Filter by interface name (optional)
+        #[arg(long)]
+        interface: Option<String>,
+    },
+    /// Create a new IPv6 subnet (RA prefix)
+    Create {
+        /// Network interface (e.g., eth0)
+        #[arg(long)]
+        interface: String,
+        /// IPv6 prefix address (e.g., 2001:db8::)
+        #[arg(long)]
+        prefix: String,
+        /// Prefix length (e.g., 64)
+        #[arg(long)]
+        prefix_len: u8,
+        /// Preferred lifetime in seconds (0 = use server default)
+        #[arg(long)]
+        preferred_lifetime: Option<u32>,
+        /// Valid lifetime in seconds (0 = use server default)
+        #[arg(long)]
+        valid_lifetime: Option<u32>,
+        /// DNS servers, comma-separated (optional)
+        #[arg(long)]
+        dns_servers: Option<String>,
+        /// DNS lifetime in seconds (0 = use server default)
+        #[arg(long)]
+        dns_lifetime: Option<u32>,
+    },
+    /// Get IPv6 subnet details
+    Get {
+        /// IPv6 subnet ID
+        id: i64,
+    },
+    /// Delete an IPv6 subnet
+    Delete {
+        /// IPv6 subnet ID
+        id: i64,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -163,6 +212,9 @@ async fn main() -> Result<()> {
         }
         Commands::Static { action } => {
             commands::static_ip::handle(client, action).await?;
+        }
+        Commands::Ip6Subnet { action } => {
+            commands::ip6subnet::handle(client, action).await?;
         }
         Commands::Leases => {
             commands::lease::list(client).await?;

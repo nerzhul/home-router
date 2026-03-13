@@ -15,7 +15,6 @@ pub(crate) mod suite {
             gateway: Ipv4Addr::new(10, 0, third_octet, 1),
             dns_servers: vec![Ipv4Addr::new(8, 8, 8, 8)],
             domain_name: Some("local".to_string()),
-            enabled: true,
         }
     }
 
@@ -61,7 +60,6 @@ pub(crate) mod suite {
             valid_lifetime: 2592000,
             dns_servers: vec![Ipv6Addr::new(0x2001, 0xdb8, prefix_group, 0, 0, 0, 0, 1)],
             dns_lifetime: 3600,
-            enabled: true,
         }
     }
 
@@ -78,7 +76,6 @@ pub(crate) mod suite {
         assert_eq!(got.gateway, Ipv4Addr::new(10, 0, 1, 1));
         assert_eq!(got.dns_servers, vec![Ipv4Addr::new(8, 8, 8, 8)]);
         assert_eq!(got.domain_name, Some("local".to_string()));
-        assert!(got.enabled);
     }
 
     pub async fn test_list_subnets(db: &dyn Database) {
@@ -89,29 +86,15 @@ pub(crate) mod suite {
         assert!(list.len() >= 2);
     }
 
-    pub async fn test_list_active_subnets(db: &dyn Database) {
-        let mut disabled = subnet(6);
-        disabled.enabled = false;
-
-        db.create_subnet(&subnet(7)).await.unwrap();
-        let disabled_id = db.create_subnet(&disabled).await.unwrap();
-
-        let active = db.list_active_subnets().await.unwrap();
-        assert!(active.iter().all(|s| s.enabled));
-        assert!(!active.iter().any(|s| s.id == Some(disabled_id)));
-    }
-
     pub async fn test_update_subnet(db: &dyn Database) {
         let id = db.create_subnet(&subnet(4)).await.unwrap();
 
         let mut updated = subnet(4);
         updated.netmask = 16;
-        updated.enabled = false;
         db.update_subnet(id, &updated).await.unwrap();
 
         let got = db.get_subnet(id).await.unwrap().expect("subnet not found");
         assert_eq!(got.netmask, 16);
-        assert!(!got.enabled);
     }
 
     pub async fn test_delete_subnet(db: &dyn Database) {
@@ -276,7 +259,6 @@ pub(crate) mod suite {
         assert_eq!(prefix.id, Some(id));
         assert_eq!(prefix.interface, "iap0");
         assert_eq!(prefix.prefix_len, 64);
-        assert!(prefix.enabled);
     }
 
     pub async fn test_list_ia_prefixes_by_interface(db: &dyn Database) {
@@ -290,23 +272,11 @@ pub(crate) mod suite {
         assert!(all.len() >= 2);
     }
 
-    pub async fn test_list_enabled_ia_prefixes(db: &dyn Database) {
-        db.create_ia_prefix(&ia_prefix("iap3", 4)).await.unwrap();
-
-        let mut disabled = ia_prefix("iap4", 5);
-        disabled.enabled = false;
-        db.create_ia_prefix(&disabled).await.unwrap();
-
-        let enabled = db.list_enabled_ia_prefixes().await.unwrap();
-        assert!(enabled.iter().all(|p| p.enabled));
-    }
-
     pub async fn test_update_ia_prefix(db: &dyn Database) {
         let id = db.create_ia_prefix(&ia_prefix("iap5", 6)).await.unwrap();
 
         let mut updated = ia_prefix("iap5", 6);
         updated.prefix_len = 48;
-        updated.enabled = false;
         db.update_ia_prefix(id, &updated).await.unwrap();
 
         let prefix = db
@@ -315,7 +285,6 @@ pub(crate) mod suite {
             .unwrap()
             .expect("prefix not found");
         assert_eq!(prefix.prefix_len, 48);
-        assert!(!prefix.enabled);
     }
 
     pub async fn test_delete_ia_prefix(db: &dyn Database) {
@@ -386,7 +355,6 @@ pub(crate) mod suite {
     pub async fn run_all(db: &dyn Database) {
         test_create_and_get_subnet(db).await;
         test_list_subnets(db).await;
-        test_list_active_subnets(db).await;
         test_update_subnet(db).await;
         test_delete_subnet(db).await;
         test_get_subnet_not_found(db).await;
@@ -407,7 +375,6 @@ pub(crate) mod suite {
 
         test_create_and_get_ia_prefix(db).await;
         test_list_ia_prefixes_by_interface(db).await;
-        test_list_enabled_ia_prefixes(db).await;
         test_update_ia_prefix(db).await;
         test_delete_ia_prefix(db).await;
 

@@ -626,7 +626,7 @@ impl DhcpServer {
 
         // Allocate a new IP from an enabled dynamic range, scoped to subnets
         // reachable via this interface.
-        let subnets = match db.list_active_subnets().await {
+        let subnets = match db.list_subnets().await {
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to list subnets: {}", e);
@@ -979,7 +979,6 @@ mod tests {
             gateway: network,
             dns_servers: vec![],
             domain_name: None,
-            enabled: true,
         }
     }
 

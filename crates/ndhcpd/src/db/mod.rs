@@ -30,7 +30,6 @@ pub trait Database: Send + Sync {
     async fn create_subnet(&self, subnet: &Subnet) -> anyhow::Result<i64>;
     async fn get_subnet(&self, id: i64) -> anyhow::Result<Option<Subnet>>;
     async fn list_subnets(&self) -> anyhow::Result<Vec<Subnet>>;
-    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>>;
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()>;
     async fn delete_subnet(&self, id: i64) -> anyhow::Result<()>;
 
@@ -58,7 +57,6 @@ pub trait Database: Send + Sync {
     async fn create_ia_prefix(&self, prefix: &IAPrefix) -> anyhow::Result<i64>;
     async fn get_ia_prefix(&self, id: i64) -> anyhow::Result<Option<IAPrefix>>;
     async fn list_ia_prefixes(&self, interface: Option<&str>) -> anyhow::Result<Vec<IAPrefix>>;
-    async fn list_enabled_ia_prefixes(&self) -> anyhow::Result<Vec<IAPrefix>>;
     async fn update_ia_prefix(&self, id: i64, prefix: &IAPrefix) -> anyhow::Result<()>;
     async fn delete_ia_prefix(&self, id: i64) -> anyhow::Result<()>;
 

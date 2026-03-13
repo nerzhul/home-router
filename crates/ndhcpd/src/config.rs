@@ -118,6 +118,14 @@ fn default_lease_cleanup_interval() -> u32 {
 /// Router Advertisement (IPv6) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaConfig {
+    /// Whether Router Advertisement is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Network interfaces the RA server should listen on
+    #[serde(default)]
+    pub ip6_listen_interfaces: Vec<String>,
+
     /// Default preferred lifetime in seconds
     #[serde(default = "default_ra_preferred_lifetime")]
     pub default_preferred_lifetime: u32,
@@ -146,6 +154,8 @@ fn default_ra_dns_lifetime() -> u32 {
 impl Default for RaConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
+            ip6_listen_interfaces: vec![],
             default_preferred_lifetime: default_ra_preferred_lifetime(),
             default_valid_lifetime: default_ra_valid_lifetime(),
             default_dns_lifetime: default_ra_dns_lifetime(),

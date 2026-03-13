@@ -70,11 +70,6 @@ impl Database for InMemoryDatabase {
         Ok(subnets.clone())
     }
 
-    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
-        let subnets = self.subnets.read().await;
-        Ok(subnets.iter().filter(|s| s.enabled).cloned().collect())
-    }
-
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()> {
         let mut subnets = self.subnets.write().await;
         if let Some(existing) = subnets.iter_mut().find(|s| s.id == Some(id)) {
@@ -243,11 +238,6 @@ impl Database for InMemoryDatabase {
         }
     }
 
-    async fn list_enabled_ia_prefixes(&self) -> anyhow::Result<Vec<IAPrefix>> {
-        let ia_prefixes = self.ia_prefixes.read().await;
-        Ok(ia_prefixes.iter().filter(|p| p.enabled).cloned().collect())
-    }
-
     async fn update_ia_prefix(&self, id: i64, prefix: &IAPrefix) -> anyhow::Result<()> {
         let mut ia_prefixes = self.ia_prefixes.write().await;
         if let Some(existing) = ia_prefixes.iter_mut().find(|p| p.id == Some(id)) {
@@ -373,7 +363,6 @@ mod tests {
         let db = InMemoryDatabase::new();
         suite::test_create_and_get_ia_prefix(&db).await;
         suite::test_list_ia_prefixes_by_interface(&db).await;
-        suite::test_list_enabled_ia_prefixes(&db).await;
         suite::test_update_ia_prefix(&db).await;
         suite::test_delete_ia_prefix(&db).await;
     }

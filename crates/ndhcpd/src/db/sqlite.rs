@@ -34,14 +34,13 @@ impl Database for SqliteDatabase {
     async fn create_subnet(&self, subnet: &Subnet) -> anyhow::Result<i64> {
         let dns_servers = subnet.dns_servers_to_string();
         let result = sqlx::query(
-            "INSERT INTO subnets (network, netmask, gateway, dns_servers, domain_name, enabled) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO subnets (network, netmask, gateway, dns_servers, domain_name) VALUES (?, ?, ?, ?, ?)"
         )
         .bind(subnet.network.to_string())
         .bind(subnet.netmask as i64)
         .bind(subnet.gateway.to_string())
         .bind(dns_servers)
         .bind(&subnet.domain_name)
-        .bind(subnet.enabled as i64)
         .execute(&self.pool)
         .await?;
 
@@ -50,7 +49,7 @@ impl Database for SqliteDatabase {
 
     async fn get_subnet(&self, id: i64) -> anyhow::Result<Option<Subnet>> {
         let row = sqlx::query(
-            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets WHERE id = ?"
+            "SELECT id, network, netmask, gateway, dns_servers, domain_name FROM subnets WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -63,13 +62,12 @@ impl Database for SqliteDatabase {
             gateway: r.get::<String, _>("gateway").parse().unwrap(),
             dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
             domain_name: r.get("domain_name"),
-            enabled: r.get::<i64, _>("enabled") != 0,
         }))
     }
 
     async fn list_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
         let rows = sqlx::query(
-            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets",
+            "SELECT id, network, netmask, gateway, dns_servers, domain_name FROM subnets",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -83,28 +81,6 @@ impl Database for SqliteDatabase {
                 gateway: r.get::<String, _>("gateway").parse().unwrap(),
                 dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
                 domain_name: r.get("domain_name"),
-                enabled: r.get::<i64, _>("enabled") != 0,
-            })
-            .collect())
-    }
-
-    async fn list_active_subnets(&self) -> anyhow::Result<Vec<Subnet>> {
-        let rows = sqlx::query(
-            "SELECT id, network, netmask, gateway, dns_servers, domain_name, enabled FROM subnets WHERE enabled = 1",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| Subnet {
-                id: r.get("id"),
-                network: r.get::<String, _>("network").parse().unwrap(),
-                netmask: r.get::<i64, _>("netmask") as u8,
-                gateway: r.get::<String, _>("gateway").parse().unwrap(),
-                dns_servers: Subnet::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
-                domain_name: r.get("domain_name"),
-                enabled: true,
             })
             .collect())
     }
@@ -112,14 +88,13 @@ impl Database for SqliteDatabase {
     async fn update_subnet(&self, id: i64, subnet: &Subnet) -> anyhow::Result<()> {
         let dns_servers = subnet.dns_servers_to_string();
         sqlx::query(
-            "UPDATE subnets SET network = ?, netmask = ?, gateway = ?, dns_servers = ?, domain_name = ?, enabled = ? WHERE id = ?"
+            "UPDATE subnets SET network = ?, netmask = ?, gateway = ?, dns_servers = ?, domain_name = ? WHERE id = ?"
         )
         .bind(subnet.network.to_string())
         .bind(subnet.netmask as i64)
         .bind(subnet.gateway.to_string())
         .bind(dns_servers)
         .bind(&subnet.domain_name)
-        .bind(subnet.enabled as i64)
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -341,7 +316,7 @@ impl Database for SqliteDatabase {
     async fn create_ia_prefix(&self, prefix: &IAPrefix) -> anyhow::Result<i64> {
         let dns_servers = prefix.dns_servers_to_string();
         let result = sqlx::query(
-            "INSERT INTO ia_prefixes (interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO ia_prefixes (interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&prefix.interface)
         .bind(prefix.prefix.to_string())
@@ -350,7 +325,6 @@ impl Database for SqliteDatabase {
         .bind(prefix.valid_lifetime as i64)
         .bind(dns_servers)
         .bind(prefix.dns_lifetime as i64)
-        .bind(prefix.enabled as i64)
         .execute(&self.pool)
         .await?;
 
@@ -359,7 +333,7 @@ impl Database for SqliteDatabase {
 
     async fn get_ia_prefix(&self, id: i64) -> anyhow::Result<Option<IAPrefix>> {
         let row = sqlx::query(
-            "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE id = ?"
+            "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime FROM ia_prefixes WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -374,21 +348,20 @@ impl Database for SqliteDatabase {
             valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
             dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
             dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
-            enabled: r.get::<i64, _>("enabled") != 0,
         }))
     }
 
     async fn list_ia_prefixes(&self, interface: Option<&str>) -> anyhow::Result<Vec<IAPrefix>> {
         let rows = if let Some(interface) = interface {
             sqlx::query(
-                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE interface = ?"
+                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime FROM ia_prefixes WHERE interface = ?"
             )
             .bind(interface)
             .fetch_all(&self.pool)
             .await?
         } else {
             sqlx::query(
-                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes"
+                "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime FROM ia_prefixes"
             )
             .fetch_all(&self.pool)
             .await?
@@ -405,30 +378,6 @@ impl Database for SqliteDatabase {
                 valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
                 dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
                 dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
-                enabled: r.get::<i64, _>("enabled") != 0,
-            })
-            .collect())
-    }
-
-    async fn list_enabled_ia_prefixes(&self) -> anyhow::Result<Vec<IAPrefix>> {
-        let rows = sqlx::query(
-            "SELECT id, interface, prefix, prefix_len, preferred_lifetime, valid_lifetime, dns_servers, dns_lifetime, enabled FROM ia_prefixes WHERE enabled = 1"
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| IAPrefix {
-                id: r.get("id"),
-                interface: r.get("interface"),
-                prefix: r.get::<String, _>("prefix").parse().unwrap(),
-                prefix_len: r.get::<i64, _>("prefix_len") as u8,
-                preferred_lifetime: r.get::<i64, _>("preferred_lifetime") as u32,
-                valid_lifetime: r.get::<i64, _>("valid_lifetime") as u32,
-                dns_servers: IAPrefix::dns_servers_from_string(&r.get::<String, _>("dns_servers")),
-                dns_lifetime: r.get::<i64, _>("dns_lifetime") as u32,
-                enabled: r.get::<i64, _>("enabled") != 0,
             })
             .collect())
     }
@@ -436,7 +385,7 @@ impl Database for SqliteDatabase {
     async fn update_ia_prefix(&self, id: i64, prefix: &IAPrefix) -> anyhow::Result<()> {
         let dns_servers = prefix.dns_servers_to_string();
         sqlx::query(
-            "UPDATE ia_prefixes SET interface = ?, prefix = ?, prefix_len = ?, preferred_lifetime = ?, valid_lifetime = ?, dns_servers = ?, dns_lifetime = ?, enabled = ? WHERE id = ?"
+            "UPDATE ia_prefixes SET interface = ?, prefix = ?, prefix_len = ?, preferred_lifetime = ?, valid_lifetime = ?, dns_servers = ?, dns_lifetime = ? WHERE id = ?"
         )
         .bind(&prefix.interface)
         .bind(prefix.prefix.to_string())
@@ -445,7 +394,6 @@ impl Database for SqliteDatabase {
         .bind(prefix.valid_lifetime as i64)
         .bind(dns_servers)
         .bind(prefix.dns_lifetime as i64)
-        .bind(prefix.enabled as i64)
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -588,7 +536,6 @@ mod tests {
         let db = new_test_db().await;
         suite::test_create_and_get_ia_prefix(&db).await;
         suite::test_list_ia_prefixes_by_interface(&db).await;
-        suite::test_list_enabled_ia_prefixes(&db).await;
         suite::test_update_ia_prefix(&db).await;
         suite::test_delete_ia_prefix(&db).await;
     }
