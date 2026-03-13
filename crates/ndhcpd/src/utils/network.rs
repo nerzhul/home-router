@@ -164,6 +164,56 @@ pub fn build_l2_udp_frame(
     frame
 }
 
+/// Returns the interface index for `iface`, or `None` on failure.
+///
+/// Wraps `if_nametoindex(3)` which is available on both Linux and FreeBSD.
+pub fn get_ifindex(iface: &str) -> Option<u32> {
+    let cstr = std::ffi::CString::new(iface).ok()?;
+    let idx = unsafe { libc::if_nametoindex(cstr.as_ptr()) };
+    if idx == 0 {
+        None
+    } else {
+        Some(idx)
+    }
+}
+
+/// Returns the first link-local (`fe80::/10`) IPv6 address of `iface`.
+///
+/// Uses `getifaddrs(3)` which is portable across Linux and FreeBSD.
+pub fn get_link_local_addr(iface: &str) -> Option<std::net::Ipv6Addr> {
+    unsafe {
+        let mut ifaddrs: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifaddrs) != 0 {
+            return None;
+        }
+        let mut result = None;
+        let mut cur = ifaddrs;
+        while !cur.is_null() {
+            let ifa = &*cur;
+            if ifa.ifa_addr.is_null() {
+                cur = ifa.ifa_next;
+                continue;
+            }
+            let family = (*ifa.ifa_addr).sa_family as i32;
+            if family == libc::AF_INET6 {
+                let name = std::ffi::CStr::from_ptr(ifa.ifa_name).to_string_lossy();
+                if name == iface {
+                    let sin6 = ifa.ifa_addr as *const libc::sockaddr_in6;
+                    let addr_bytes = (*sin6).sin6_addr.s6_addr;
+                    // fe80::/10 → first byte 0xfe, second byte high two bits = 10 (0x80)
+                    if addr_bytes[0] == 0xfe && (addr_bytes[1] & 0xc0) == 0x80 {
+                        result = Some(std::net::Ipv6Addr::from(addr_bytes));
+                        break;
+                    }
+                }
+            }
+            cur = ifa.ifa_next;
+        }
+        libc::freeifaddrs(ifaddrs);
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

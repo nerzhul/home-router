@@ -34,5 +34,6 @@ base64 = "0.22.1"
 getrandom = "0.4.1"
 rand = "0.8"
 async-trait.workspace = true
+futures = "0.3"
 libc = "0.2"
 syslog = "6"

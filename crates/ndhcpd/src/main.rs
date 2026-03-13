@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use ndhcpd::{
     config::RaConfig, create_database, create_router_with_auth, dhcp::DhcpServer,
-    utils::logging::SyslogLayer, Config,
+    utils::logging::SyslogLayer, Config, RaServer,
 };
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -232,6 +232,16 @@ async fn main() -> Result<()> {
             error!("API server error: {}", e);
         }
     });
+
+    // Start Router Advertisement server (IPv6) if enabled
+    if config.ra.as_ref().map_or(false, |ra| ra.enabled) {
+        let ra_server = RaServer::new(Arc::clone(&config), Arc::clone(&db));
+        tokio::spawn(async move {
+            if let Err(e) = ra_server.run().await {
+                error!("RA server error: {}", e);
+            }
+        });
+    }
 
     // Start DHCP server
     let dhcp_server = DhcpServer::new(Arc::clone(&config), Arc::clone(&db));

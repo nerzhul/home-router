@@ -4,11 +4,13 @@ pub mod db;
 pub mod dhcp;
 pub mod handlers;
 pub mod models;
+pub mod ra;
 pub mod utils;
 
 pub use config::{Config, RaConfig};
 pub use db::{create_database, Database, DynDatabase, InMemoryDatabase, SqliteDatabase};
 pub use models::{DynamicRange, IAPrefix, StaticIP, Subnet};
+pub use ra::RaServer;
 
 use std::sync::Arc;
 use utoipa::OpenApi;
