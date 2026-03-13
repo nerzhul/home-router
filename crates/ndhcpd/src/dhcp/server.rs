@@ -11,86 +11,160 @@ use crate::db::{Database, DynDatabase};
 const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
 
-/// Bind `socket` to a specific network interface so that only packets arriving
-/// on that interface are received.
+/// Enable reception of per-packet interface information through ancillary data.
 ///
-/// * Linux   – uses `SO_BINDTODEVICE` (SOL_SOCKET), passing the interface name.
-/// * FreeBSD – attempts `SO_BINDTODEVICE` (FreeBSD 14+); degrades gracefully on
-///             older kernels (socket then accepts packets from all interfaces).
-fn bind_socket_to_interface(socket: &UdpSocket, interface: &str) -> anyhow::Result<()> {
+/// * Linux   – `IP_PKTINFO` delivers `struct in_pktinfo` with `ipi_ifindex`.
+/// * FreeBSD – `IP_RECVIF` delivers `struct sockaddr_dl` with `sdl_index`.
+///
+/// After this call every `recvmsg(2)` on the socket will include a `IPPROTO_IP`
+/// control message that identifies the interface the datagram arrived on.
+fn enable_recv_interface(socket: &UdpSocket) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
-    {
-        use std::ffi::CString;
-
-        let iface_cstr = CString::new(interface)?;
-        let ret = unsafe {
-            libc::setsockopt(
-                socket.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_BINDTODEVICE,
-                iface_cstr.as_ptr() as *const libc::c_void,
-                iface_cstr.as_bytes_with_nul().len() as libc::socklen_t,
-            )
-        };
-        if ret != 0 {
-            return Err(anyhow::anyhow!(
-                "Failed to bind socket to interface {}: {}",
-                interface,
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(())
-    }
-
+    let optname = libc::IP_PKTINFO;
     #[cfg(target_os = "freebsd")]
-    {
-        use std::ffi::CString;
+    let optname = libc::IP_RECVIF;
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    return Err(anyhow::anyhow!(
+        "enable_recv_interface: unsupported platform"
+    ));
 
-        // SO_BINDTODEVICE was added to FreeBSD 14.0 as a Linux-compatibility
-        // option. The libc crate does not expose it yet for the freebsd target,
-        // so we define the constant ourselves.
-        // Older FreeBSD kernels will reject the call with ENOPROTOOPT; we log a
-        // warning and continue rather than aborting so that the server still
-        // works on FreeBSD < 14 (interface isolation is then left to routing).
-        const SO_BINDTODEVICE_FREEBSD: libc::c_int = 0x10000;
+    let one: libc::c_int = 1;
+    let ret = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            optname,
+            &one as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        return Err(anyhow::anyhow!(
+            "setsockopt IP_RECVIF/IP_PKTINFO: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
 
-        let iface_cstr = CString::new(interface)?;
-        let ret = unsafe {
-            libc::setsockopt(
-                socket.as_raw_fd(),
-                libc::SOL_SOCKET,
-                SO_BINDTODEVICE_FREEBSD,
-                iface_cstr.as_ptr() as *const libc::c_void,
-                iface_cstr.as_bytes_with_nul().len() as libc::socklen_t,
-            )
+/// Receive one UDP datagram and return *(bytes_received, source_addr, interface_name)*.
+///
+/// Uses `recvmsg(2)` to harvest ancillary data that identifies the network
+/// interface the datagram arrived on (`IP_RECVIF` on FreeBSD, `IP_PKTINFO` on
+/// Linux).  If the interface cannot be determined, `"unknown"` is returned as
+/// the interface name so that the caller can apply its filter and drop the packet.
+fn recv_with_interface(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+) -> anyhow::Result<(usize, SocketAddr, String)> {
+    // 256 bytes is more than enough for one IP_RECVIF / IP_PKTINFO cmsg.
+    let mut ctrl = [0u8; 256];
+    let mut src_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+
+    let (len, iface_name) = unsafe {
+        let mut iov = libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_len: buf.len(),
         };
-        if ret != 0 {
-            let err = std::io::Error::last_os_error();
-            // ENOPROTOOPT (42) means the kernel is older than FreeBSD 14 and
-            // does not support SO_BINDTODEVICE; degrade gracefully.
-            if err.raw_os_error() == Some(libc::ENOPROTOOPT) {
-                tracing::warn!(
-                    "SO_BINDTODEVICE is not supported on this FreeBSD kernel; \
-                     interface {} isolation relies on routing only",
-                    interface
+        let mut msg: libc::msghdr = std::mem::zeroed();
+        msg.msg_name = &mut src_storage as *mut _ as *mut libc::c_void;
+        msg.msg_namelen =
+            std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1 as _; // c_int on FreeBSD, size_t on Linux
+        msg.msg_control = ctrl.as_mut_ptr() as *mut libc::c_void;
+        msg.msg_controllen = ctrl.len() as _; // socklen_t on FreeBSD, size_t on Linux
+
+        let n = libc::recvmsg(socket.as_raw_fd(), &mut msg, 0);
+        if n < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+
+        let name = parse_interface_from_cmsg(&msg)
+            .unwrap_or_else(|| "unknown".to_string());
+        (n as usize, name)
+    };
+
+    let src = unsafe { sockaddr_storage_to_socketaddr(&src_storage) }
+        .unwrap_or_else(|| SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0));
+
+    Ok((len, src, iface_name))
+}
+
+/// Extract the incoming interface name from `recvmsg` ancillary data.
+///
+/// FreeBSD: `IPPROTO_IP` / `IP_RECVIF` → `sockaddr_dl.sdl_index`
+/// Linux:   `IPPROTO_IP` / `IP_PKTINFO` → `in_pktinfo.ipi_ifindex`
+#[cfg(target_os = "freebsd")]
+unsafe fn parse_interface_from_cmsg(msg: &libc::msghdr) -> Option<String> {
+    let mut cmsg = libc::CMSG_FIRSTHDR(msg);
+    while !cmsg.is_null() {
+        let cm = &*cmsg;
+        if cm.cmsg_level == libc::IPPROTO_IP && cm.cmsg_type == libc::IP_RECVIF {
+            let sdl = libc::CMSG_DATA(cmsg) as *const libc::sockaddr_dl;
+            let idx = (*sdl).sdl_index as libc::c_uint;
+            let mut name_buf = [0u8; libc::IFNAMSIZ];
+            if !libc::if_indextoname(
+                idx,
+                name_buf.as_mut_ptr() as *mut libc::c_char,
+            )
+            .is_null()
+            {
+                return Some(
+                    std::ffi::CStr::from_ptr(name_buf.as_ptr() as *const libc::c_char)
+                        .to_string_lossy()
+                        .into_owned(),
                 );
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Failed to bind socket to interface {}: {}",
-                    interface,
-                    err
-                ));
             }
         }
-        Ok(())
+        cmsg = libc::CMSG_NXTHDR(msg, cmsg);
     }
+    None
+}
 
-    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-    {
-        let _ = (socket, interface);
-        Err(anyhow::anyhow!(
-            "Binding socket to interface is not supported on this platform"
-        ))
+#[cfg(target_os = "linux")]
+unsafe fn parse_interface_from_cmsg(msg: &libc::msghdr) -> Option<String> {
+    let mut cmsg = libc::CMSG_FIRSTHDR(msg);
+    while !cmsg.is_null() {
+        let cm = &*cmsg;
+        if cm.cmsg_level == libc::IPPROTO_IP && cm.cmsg_type == libc::IP_PKTINFO {
+            let pktinfo = libc::CMSG_DATA(cmsg) as *const libc::in_pktinfo;
+            let idx = (*pktinfo).ipi_ifindex as libc::c_uint;
+            let mut name_buf = [0u8; libc::IFNAMSIZ];
+            if !libc::if_indextoname(
+                idx,
+                name_buf.as_mut_ptr() as *mut libc::c_char,
+            )
+            .is_null()
+            {
+                return Some(
+                    std::ffi::CStr::from_ptr(name_buf.as_ptr() as *const libc::c_char)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+        cmsg = libc::CMSG_NXTHDR(msg, cmsg);
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "freebsd", target_os = "linux")))]
+unsafe fn parse_interface_from_cmsg(_msg: &libc::msghdr) -> Option<String> {
+    None
+}
+
+/// Convert a `sockaddr_storage` populated by `recvmsg` into a `SocketAddr`.
+unsafe fn sockaddr_storage_to_socketaddr(
+    ss: &libc::sockaddr_storage,
+) -> Option<SocketAddr> {
+    if ss.ss_family as i32 == libc::AF_INET {
+        let sin = ss as *const _ as *const libc::sockaddr_in;
+        let ip = Ipv4Addr::from(u32::from_be((*sin).sin_addr.s_addr));
+        let port = u16::from_be((*sin).sin_port);
+        Some(SocketAddr::new(ip.into(), port))
+    } else {
+        None
     }
 }
 
@@ -195,20 +269,19 @@ impl DhcpServer {
     pub async fn run(&self) -> anyhow::Result<()> {
         info!("Starting DHCP server");
 
-        for interface in &self.config.listen_interfaces {
-            info!("Binding to interface {}", interface);
+        // A single socket listens on 0.0.0.0:67. The incoming interface is
+        // identified from ancillary data (IP_RECVIF / IP_PKTINFO) and packets
+        // are filtered against config.listen_interfaces before processing.
+        let server = Arc::new(Self {
+            config: Arc::clone(&self.config),
+            db: Arc::clone(&self.db),
+        });
 
-            // Clone Arc references for the spawned task
-            let config = Arc::clone(&self.config);
-            let db = Arc::clone(&self.db);
-            let interface = interface.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = Self::listen_loop(interface.clone(), config, db).await {
-                    error!("DHCP listener error on interface {}: {}", interface, e);
-                }
-            });
-        }
+        tokio::spawn(async move {
+            if let Err(e) = server.listen_loop().await {
+                error!("DHCP listener error: {}", e);
+            }
+        });
 
         // Keep running
         loop {
@@ -216,43 +289,50 @@ impl DhcpServer {
         }
     }
 
-    async fn listen_loop(
-        interface: String,
-        config: Arc<Config>,
-        db: DynDatabase,
-    ) -> anyhow::Result<()> {
+    async fn listen_loop(&self) -> anyhow::Result<()> {
         let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), DHCP_SERVER_PORT);
         let socket = UdpSocket::bind(addr)?;
         socket.set_broadcast(true)?;
 
-        // Bind the socket to the specific network interface so only packets
-        // arriving on that interface are received.
-        //
-        // Linux:   SO_BINDTODEVICE (SOL_SOCKET) – pass interface name as string.
-        // FreeBSD: SO_BINDTODEVICE (SOL_SOCKET, FreeBSD 14+); degrades gracefully
-        //          on older kernels (packets from all interfaces are then accepted).
-        bind_socket_to_interface(&socket, &interface)?;
+        // Enable ancillary-data delivery so recvmsg can report which interface
+        // each datagram arrived on (IP_RECVIF on FreeBSD, IP_PKTINFO on Linux).
+        enable_recv_interface(&socket)?;
 
-        // Create a dedicated socket for sending DHCP broadcast responses.
-        // Required on FreeBSD when the client sets the BROADCAST flag (see
-        // create_broadcast_send_socket for details).  For unicast responses
-        // (the common case per RFC 2131 §4.1) the main socket is used instead.
-        let broadcast_send_socket = create_broadcast_send_socket(&interface);
+        // Per-interface broadcast send sockets, created lazily on first use.
+        // Required on FreeBSD when the BROADCAST flag is set by the client
+        // (see create_broadcast_send_socket for the rationale).
+        let mut bcast_sockets: std::collections::HashMap<String, Option<UdpSocket>> =
+            std::collections::HashMap::new();
 
         info!(
-            "DHCP server listening on interface {} (0.0.0.0:{})",
-            interface, DHCP_SERVER_PORT
+            "DHCP server listening on 0.0.0.0:{} (managed interfaces: {})",
+            DHCP_SERVER_PORT,
+            self.config.listen_interfaces.join(", ")
         );
 
-        let mut buf = vec![0u8; 1024];
+        let mut buf = vec![0u8; 1500];
 
         loop {
-            let (len, src) = socket.recv_from(&mut buf)?;
-            debug!("Received {} bytes from {}", len, src);
+            let (len, src, iface_name) = match recv_with_interface(&socket, &mut buf) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!("recvmsg error: {}", e);
+                    continue;
+                }
+            };
+
+            // Drop packets arriving on interfaces we do not manage.
+            if !self.config.listen_interfaces.iter().any(|i| i == &iface_name) {
+                debug!(
+                    "Ignoring DHCP packet on unmanaged interface {}",
+                    iface_name
+                );
+                continue;
+            }
+
+            debug!("Received {} bytes from {} on {}", len, src, iface_name);
 
             let packet_data = &buf[..len];
-
-            // Parse packet
             let packet = match DhcpPacket::parse(packet_data) {
                 Ok(p) => p,
                 Err(e) => {
@@ -261,27 +341,29 @@ impl DhcpServer {
                 }
             };
 
-            // Handle packet
-            let iface_ips = get_interface_ips(&interface);
-            let response = Self::handle_packet(&packet, &iface_ips, &config, &*db).await;
+            let iface_ips = get_interface_ips(&iface_name);
+            let response = Self::handle_packet(&packet, &iface_ips, &self.config, &*self.db).await;
 
             if let Some(response_packet) = response {
                 let response_bytes = response_packet.to_bytes();
                 // Determine destination per RFC 2131 §4.1:
-                //   giaddr != 0  → relay agent on port 67
-                //   ciaddr != 0  → unicast to ciaddr:68
-                //   BROADCAST flag → 255.255.255.255:68  (broadcast socket)
-                //   otherwise   → unicast to yiaddr:68  (works on all platforms)
+                //   giaddr != 0        → relay agent on port 67
+                //   ciaddr != 0        → unicast to ciaddr:68
+                //   BROADCAST flag set → 255.255.255.255:68 (broadcast socket)
+                //   otherwise          → unicast to yiaddr:68
                 let dest = response_dest(&packet, &response_packet);
                 let is_broadcast =
                     dest.ip() == std::net::IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255));
 
                 let result = if is_broadcast {
-                    // Use the dedicated socket with SO_DONTROUTE for FreeBSD
+                    // Use a per-interface socket with SO_DONTROUTE for FreeBSD
                     // compatibility (see create_broadcast_send_socket).
-                    match &broadcast_send_socket {
-                        Ok(s) => s.send_to(&response_bytes, dest),
-                        Err(_) => socket.send_to(&response_bytes, dest),
+                    let bcast_sock = bcast_sockets
+                        .entry(iface_name.clone())
+                        .or_insert_with(|| create_broadcast_send_socket(&iface_name).ok());
+                    match bcast_sock {
+                        Some(s) => s.send_to(&response_bytes, dest),
+                        None => socket.send_to(&response_bytes, dest),
                     }
                 } else {
                     socket.send_to(&response_bytes, dest)
