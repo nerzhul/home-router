@@ -7,6 +7,7 @@ use tracing::{debug, error, info, warn};
 use super::packet::{DhcpOption, DhcpPacket, MessageType};
 use crate::config::Config;
 use crate::db::{Database, DynDatabase};
+use crate::utils::network::{build_l2_udp_frame, get_iface_mac};
 
 const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
@@ -226,13 +227,141 @@ fn create_broadcast_send_socket(interface: &str) -> anyhow::Result<UdpSocket> {
     Ok(s)
 }
 
-/// Determines the UDP destination for a DHCP server response per RFC 2131 §4.1.
+/// Sends a raw Ethernet frame directly on `iface` using `AF_PACKET` (Linux).
+#[cfg(target_os = "linux")]
+fn send_raw_l2_frame(iface: &str, frame: &[u8]) -> anyhow::Result<()> {
+    // ETH_P_IP in network byte order
+    const ETH_P_IP_BE: libc::c_int = 0x0008; // 0x0800 big-endian
+
+    let sock = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_IP_BE) };
+    if sock < 0 {
+        return Err(anyhow::anyhow!("socket(AF_PACKET): {}", std::io::Error::last_os_error()));
+    }
+
+    let iface_cstr = std::ffi::CString::new(iface)
+        .map_err(|_| anyhow::anyhow!("invalid interface name: {}", iface))?;
+    let ifindex = unsafe { libc::if_nametoindex(iface_cstr.as_ptr()) };
+    if ifindex == 0 {
+        unsafe { libc::close(sock) };
+        return Err(anyhow::anyhow!(
+            "if_nametoindex({}): {}",
+            iface,
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mut sa: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+    sa.sll_family = libc::AF_PACKET as u16;
+    sa.sll_protocol = 0x0008u16; // ETH_P_IP network byte order
+    sa.sll_ifindex = ifindex as i32;
+    sa.sll_halen = 6;
+    sa.sll_addr[..6].copy_from_slice(&frame[0..6]); // dst MAC from frame header
+
+    let ret = unsafe {
+        libc::sendto(
+            sock,
+            frame.as_ptr() as *const libc::c_void,
+            frame.len(),
+            0,
+            &sa as *const libc::sockaddr_ll as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
+        )
+    };
+    unsafe { libc::close(sock) };
+    if ret < 0 {
+        return Err(anyhow::anyhow!("sendto(AF_PACKET): {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Sends a raw Ethernet frame directly on `iface` using the BPF device (FreeBSD).
+#[cfg(target_os = "freebsd")]
+fn send_raw_l2_frame(iface: &str, frame: &[u8]) -> anyhow::Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let bpf = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/bpf")
+        .map_err(|e| anyhow::anyhow!("open /dev/bpf: {}", e))?;
+    let fd = bpf.as_raw_fd();
+
+    // BIOCSETIF = _IOW('B', 108, struct ifreq)
+    let biocsetif = (0x80000000u32
+        | ((std::mem::size_of::<libc::ifreq>() as u32 & 0x1fff) << 16)
+        | (b'B' as u32) << 8
+        | 108u32) as libc::c_ulong;
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    let iface_bytes = iface.as_bytes();
+    let copy_len = iface_bytes.len().min(libc::IFNAMSIZ - 1);
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            iface_bytes.as_ptr() as *const libc::c_char,
+            ifr.ifr_name.as_mut_ptr(),
+            copy_len,
+        );
+    }
+
+    let ret = unsafe { libc::ioctl(fd, biocsetif, &ifr) };
+    if ret != 0 {
+        return Err(anyhow::anyhow!("BIOCSETIF({}): {}", iface, std::io::Error::last_os_error()));
+    }
+
+    let written = unsafe { libc::write(fd, frame.as_ptr() as *const libc::c_void, frame.len()) };
+    if written < 0 {
+        return Err(anyhow::anyhow!("BPF write: {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Sends a DHCP response by forging a complete Ethernet/IP/UDP frame via a raw
+/// socket, fully bypassing the kernel routing table and ARP subsystem.
+///
+/// Used for OFFER and ACK responses to a client in SELECTING state (`ciaddr=0`):
+/// the client has no configured IP yet so the kernel cannot resolve `yiaddr` via
+/// ARP.  Forging the full L2 frame sidesteps both the routing table and the ARP
+/// subsystem entirely.
+///
+/// * Ethernet dst  : `ff:ff:ff:ff:ff:ff`  (broadcast at L2)
+/// * IP dst        : `dst_ip`  – either `yiaddr` or `255.255.255.255` depending
+///                   on whether the client set the BROADCAST flag (RFC 2131 §4.1)
+/// * IP src        : first IPv4 address of `iface` (server identifier)
+/// * Ethernet src  : MAC address of `iface`
+///
+/// Platform: `AF_PACKET`/`SOCK_RAW` on Linux, BPF device on FreeBSD.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn send_dhcp_raw_l2_broadcast(
+    iface: &str,
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    dhcp_payload: &[u8],
+) -> anyhow::Result<()> {
+    const BROADCAST_MAC: [u8; 6] = [0xff; 6];
+    let src_mac = get_iface_mac(iface).unwrap_or([0u8; 6]);
+    let frame = build_l2_udp_frame(
+        src_mac,
+        BROADCAST_MAC,
+        src_ip,
+        dst_ip,
+        DHCP_SERVER_PORT,
+        DHCP_CLIENT_PORT,
+        dhcp_payload,
+    );
+    send_raw_l2_frame(iface, &frame)
+}
+
+/// Determines the UDP/IP destination for a DHCP server response per RFC 2131 §4.1.
 ///
 /// Rules applied in order:
 /// 1. `giaddr` != 0 (relay agent): send to relay agent on port 67.
 /// 2. `ciaddr` != 0 (client has a configured IP): unicast to `ciaddr:68`.
-/// 3. BROADCAST flag set in client request: broadcast to `255.255.255.255:68`.
-/// 4. Otherwise: unicast to the offered/assigned IP (`yiaddr`) on port 68.
+/// 3. BROADCAST flag set in client request: `255.255.255.255:68`.
+/// 4. Otherwise: unicast to `yiaddr:68`.
+///
+/// When `ciaddr=0` (client in SELECTING state), the caller uses
+/// [`send_dhcp_raw_l2_broadcast`] which forges the complete L2 frame with
+/// Ethernet dst `ff:ff:ff:ff:ff:ff`, bypassing both ARP and the routing table.
 fn response_dest(
     request: &DhcpPacket,
     response: &DhcpPacket,
@@ -248,10 +377,11 @@ fn response_dest(
         SocketAddr::new(request.ciaddr.into(), DHCP_CLIENT_PORT)
     } else if request.flags & BROADCAST_FLAG != 0 {
         // Client explicitly requested a broadcast reply
-        SocketAddr::new(Ipv4Addr::new(255, 255, 255, 255).into(), DHCP_CLIENT_PORT)
+        SocketAddr::new(Ipv4Addr::BROADCAST.into(), DHCP_CLIENT_PORT)
     } else {
-        // Unicast to the offered/assigned address – works on all platforms
-        // without any special socket options.
+        // Unicast to the offered/assigned address.
+        // For OFFER responses, the caller injects yiaddr→ff:ff:ff:ff:ff:ff in
+        // the ARP table so the frame is delivered as an Ethernet broadcast.
         SocketAddr::new(response.yiaddr.into(), DHCP_CLIENT_PORT)
     }
 }
@@ -365,15 +495,48 @@ impl DhcpServer {
                 // Determine destination per RFC 2131 §4.1:
                 //   giaddr != 0        → relay agent on port 67
                 //   ciaddr != 0        → unicast to ciaddr:68
-                //   BROADCAST flag set → 255.255.255.255:68 (broadcast socket)
+                //   BROADCAST flag set → 255.255.255.255:68
                 //   otherwise          → unicast to yiaddr:68
                 let dest = response_dest(&packet, &response_packet);
                 let is_broadcast =
-                    dest.ip() == std::net::IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255));
+                    dest.ip() == std::net::IpAddr::V4(Ipv4Addr::BROADCAST);
 
+                info!(
+                    "Sending DHCP response type {} to {} ({}), broadcast={}",
+                    response_packet
+                        .get_message_type()
+                        .map_or("Unknown".to_string(), |t| format!("{t:?}")),
+                    dest,
+                    iface_name,
+                    is_broadcast
+                );
+
+                // When ciaddr=0 the client is in SELECTING state and has no ARP entry
+                // for yiaddr yet. Forge the full L2/IP/UDP frame directly so that:
+                //   - Ethernet dst = ff:ff:ff:ff:ff:ff  (L2 broadcast)
+                //   - IP dst       = yiaddr (unicast OFFER/ACK per RFC 2131 §4.1)
+                //                    or 255.255.255.255 if client set BROADCAST flag
+                // This covers both OFFER (after DISCOVER) and ACK (after REQUEST
+                // in SELECTING state, where ciaddr is still 0).
+                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                if packet.ciaddr == Ipv4Addr::UNSPECIFIED && packet.giaddr == Ipv4Addr::UNSPECIFIED {
+                    let dst_ip = if is_broadcast {
+                        Ipv4Addr::BROADCAST
+                    } else {
+                        response_packet.yiaddr
+                    };
+                    let src_ip = iface_ips.first().copied().unwrap_or(Ipv4Addr::UNSPECIFIED);
+                    if let Err(e) = send_dhcp_raw_l2_broadcast(&iface_name, src_ip, dst_ip, &response_bytes) {
+                        warn!("Failed to send raw L2 response ({:?}) to {}: {}",
+                            response_packet.get_message_type(), dst_ip, e);
+                    }
+                    continue;
+                }
+
+                // ciaddr != 0: client is RENEWING/REBINDING and already has an ARP entry.
+                // Use the regular UDP socket; for 255.255.255.255 use the per-interface
+                // socket with SO_DONTROUTE (FreeBSD routing-table bypass).
                 let result = if is_broadcast {
-                    // Use a per-interface socket with SO_DONTROUTE for FreeBSD
-                    // compatibility (see create_broadcast_send_socket).
                     let bcast_sock = bcast_sockets
                         .entry(iface_name.clone())
                         .or_insert_with(|| create_broadcast_send_socket(&iface_name).ok());
