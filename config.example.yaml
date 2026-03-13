@@ -21,6 +21,8 @@ api:
 logging:
   # Send logs to syslog (LOG_DAEMON facility) in addition to stdout (default: false)
   syslog: false
+  # Minimum log level: error, warn, info, debug, trace (default: info)
+  level: info
 
 # DHCP Server configuration
 dhcp:

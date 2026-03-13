@@ -53,8 +53,9 @@ async fn main() -> Result<()> {
     let mut config = Config::from_file(&config_path).unwrap_or_else(|_| Config::default());
 
     // ── 3. Initialize tracing (syslog if enabled, otherwise stdout) ──────────
+    let default_filter = format!("ndhcpd={}", config.logging.level);
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "ndhcpd=debug".into());
+        .unwrap_or_else(|_| default_filter.as_str().into());
 
     let (stdout_layer, syslog_layer) = if config.logging.syslog {
         match SyslogLayer::new() {

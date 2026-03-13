@@ -1,16 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
     /// Send logs to syslog in addition to stdout
     #[serde(default)]
     pub syslog: bool,
+
+    /// Minimum log level: error, warn, info, debug, trace (default: info)
+    #[serde(default = "default_log_level")]
+    pub level: String,
 }
 
 impl Default for LoggingConfig {
     fn default() -> Self {
-        Self { syslog: false }
+        Self {
+            syslog: false,
+            level: default_log_level(),
+        }
     }
 }
 
