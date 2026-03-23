@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
-    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -21,20 +19,4 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-  release:
-    name: Release build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build release
-        run: cargo build --workspace --release
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ndhcpd-${{ github.ref_name }}
-          path: |
-            target/release/ndhcpd
-            target/release/ndhcp-cli
+
