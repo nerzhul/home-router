@@ -25,15 +25,41 @@ utoipa = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-utoipa-swagger-ui = { workspace = true }
-hyper = "1.5"
-hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio"] }
-clap.workspace = true
-argon2 = "0.5.3"
-base64 = "0.22.1"
-getrandom = "0.4.1"
-rand = "0.8"
-async-trait.workspace = true
-futures = "0.3"
-libc = "0.2"
-syslog = "7"
+utoipa-swagger-ui = { workspace = true, optional = true }
+
+[features]
+swagger-ui = ["dep:utoipa-swagger-ui"]
+
+[dependencies.hyper]
+version = "1.5"
+
+[dependencies.hyper-util]
+version = "0.1"
+features = ["server", "server-auto", "tokio"]
+
+[dependencies.clap]
+workspace = true
+
+[dependencies.argon2]
+version = "0.5.3"
+
+[dependencies.base64]
+version = "0.22.1"
+
+[dependencies.getrandom]
+version = "0.4.1"
+
+[dependencies.rand]
+version = "0.8"
+
+[dependencies.async-trait]
+workspace = true
+
+[dependencies.futures]
+version = "0.3"
+
+[dependencies.libc]
+version = "0.2"
+
+[dependencies.syslog]
+version = "7"

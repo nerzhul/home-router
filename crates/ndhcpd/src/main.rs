@@ -225,6 +225,7 @@ async fn main() -> Result<()> {
             api_addr
         );
     }
+    #[cfg(feature = "swagger-ui")]
     info!("Swagger UI available at http://{}/swagger-ui", api_addr);
 
     tokio::spawn(async move {

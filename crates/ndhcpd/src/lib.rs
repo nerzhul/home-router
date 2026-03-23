@@ -14,6 +14,7 @@ pub use ra::RaServer;
 
 use std::sync::Arc;
 use utoipa::OpenApi;
+#[cfg(feature = "swagger-ui")]
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(OpenApi)]
@@ -89,6 +90,7 @@ pub fn create_router_with_auth(
     require_auth: bool,
 ) -> axum::Router {
     let app = handlers::create_router_with_auth(db, ra_config, require_auth);
-    // Merge with Swagger UI
-    app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+    #[cfg(feature = "swagger-ui")]
+    let app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()));
+    app
 }
