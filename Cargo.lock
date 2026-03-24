@@ -1270,6 +1270,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "rand 0.10.0",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
  "serde_yaml",

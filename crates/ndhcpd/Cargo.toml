@@ -43,6 +43,10 @@ workspace = true
 [dependencies.argon2]
 version = "0.5.3"
 
+[dependencies.rand_core]
+version = "0.6"
+features = ["getrandom"]
+
 [dependencies.base64]
 version = "0.22.1"
 
@@ -51,6 +55,7 @@ version = "0.4.1"
 
 [dependencies.rand]
 version = "0.10"
+features = ["sys_rng", "thread_rng"]
 
 [dependencies.async-trait]
 workspace = true

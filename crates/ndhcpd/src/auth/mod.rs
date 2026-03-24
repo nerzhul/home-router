@@ -1,50 +1,15 @@
-use anyhow::{anyhow, Result};
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-    Argon2, PasswordHash, PasswordVerifier,
-};
+use anyhow::Result;
 use axum::{
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use base64::{engine::general_purpose, Engine as _};
 use tracing::warn;
 
 use crate::db::DynDatabase;
 
-const TOKEN_LENGTH: usize = 32;
-
-/// Generate a new API token
-pub fn generate_token() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let token_bytes: Vec<u8> = (0..TOKEN_LENGTH).map(|_| rng.gen()).collect();
-    general_purpose::STANDARD.encode(&token_bytes)
-}
-
-/// Hash a token with Argon2
-pub fn hash_token(token: &str) -> Result<(String, String)> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-
-    let password_hash = argon2
-        .hash_password(token.as_bytes(), &salt)
-        .map_err(|e| anyhow!("Failed to hash token: {}", e))?;
-
-    Ok((password_hash.to_string(), salt.to_string()))
-}
-
-/// Verify a token against a stored hash
-pub fn verify_token(token: &str, hash: &str) -> Result<bool> {
-    let parsed_hash =
-        PasswordHash::new(hash).map_err(|e| anyhow!("Failed to parse hash: {}", e))?;
-
-    Ok(Argon2::default()
-        .verify_password(token.as_bytes(), &parsed_hash)
-        .is_ok())
-}
+pub mod token;
 
 /// Store connection type in request extensions
 #[derive(Clone)]
@@ -99,7 +64,7 @@ async fn verify_token_in_db(db: &DynDatabase, token: &str) -> Result<bool> {
     let tokens = db.list_tokens().await?;
 
     for (token_hash, enabled) in tokens {
-        if verify_token(token, &token_hash)? {
+        if token::verify(token, &token_hash)? {
             let _ = db.update_token_last_used(&token_hash).await;
             return Ok(enabled == 1);
         }

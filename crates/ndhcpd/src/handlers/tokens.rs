@@ -7,7 +7,7 @@ use axum::{
 use tracing::error;
 
 use crate::{
-    auth::{generate_token, hash_token},
+    auth::token,
     db::is_unique_violation,
     models::{ApiToken, CreateTokenRequest, CreateTokenResponse},
     AppState,
@@ -52,8 +52,8 @@ pub async fn create_token(
     State(state): State<AppState>,
     Json(request): Json<CreateTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateTokenResponse>), impl IntoResponse> {
-    let token = generate_token();
-    let (token_hash, salt) = hash_token(&token).map_err(|e| {
+    let token = token::generate();
+    let (token_hash, salt) = token::hash(&token).map_err(|e| {
         error!("Failed to hash token: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash token")
     })?;
